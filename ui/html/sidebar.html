@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FavGallery</title>
+    <link rel="stylesheet" href="../css/sidebar.css">
+</head>
+<body>
+<div class="container" id="sidebarContainer">
+    <!-- 头部 -->
+    <div class="header">
+        <h1>🎬 FavGallery</h1>
+        <p><!-- 动态填充 --></p>
+    </div>
+
+    <!-- 用户信息 -->
+    <div class="section">
+        <div class="section-title">👤 用户信息</div>
+        <div id="userInfo">
+            <div style="color: #999; font-size: 13px;">加载中...</div>
+        </div>
+    </div>
+
+    <!-- 存储位置 -->
+    <div class="section">
+        <div class="section-title">📁 存储位置</div>
+        <button id="selectFolder" class="btn btn-primary">选择文件夹</button>
+        <div id="folderStatus" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+    </div>
+
+    <!-- 关注列表 -->
+    <div class="section">
+
+        <!-- Tab 标签 -->
+        <div style="display: flex; border-bottom: 2px solid #e8e8e8; margin-bottom: 10px;">
+            <button id="tabFollowing" class="tab-btn active">👥 关注列表</button>
+            <button id="tabLiked" class="tab-btn">❤️ 点赞列表</button>
+            <button id="tabBookmarked" class="tab-btn">⭐ 收藏列表</button>
+        </div>
+
+        <!-- 关注列表内容 -->
+        <div id="tabContentFollowing" class="tab-content">
+            <button id="loadFollowing" class="btn btn-primary" disabled>刷新关注列表</button>
+            <div id="followingStatus" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+
+            <!-- 搜索框 -->
+            <div style="margin-top: 10px;">
+                <input
+                        type="text"
+                        id="searchInput"
+                        placeholder="搜索用户名或抖音号..."
+                        style="width: 100%; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px;"
+                        disabled
+                >
+            </div>
+
+            <!-- ✅ 批量操作栏 -->
+            <div id="followingBatchActions" style="margin-top: 10px; padding: 8px; background: #f0f0f0; border-radius: 4px;">
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: nowrap;">
+                    <select id="followingBatchSelect" style="padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; min-width: 100px;">
+                        <option value="">-- 批量选择 --</option>
+                        <option value="current">当前页作者</option>
+                        <option value="all">所有作者</option>
+                    </select>
+                    <button class="batch-download-btn btn btn-primary" style="width: auto; padding: 4px 8px; font-size: 12px; white-space: nowrap;" disabled data-type="following">
+                        ⬇️ 批量保存 (<span id="followingSelectedCount" class="selected-count">0</span>)
+                    </button>
+                    <button class="stop-download-btn btn btn-primary" style="width: auto; padding: 4px 8px; font-size: 12px; white-space: nowrap;" disabled>
+                        ⏹️ 批量停止
+                    </button>
+                </div>
+            </div>
+
+            <!-- 分页控件 -->
+            <div id="followingPagination" style="margin-top: 10px; text-align: center;">
+                <button id="followingPrevPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">上一页</button>
+                <span id="followingPageInfo" style="margin: 0 10px; font-size: 13px;">第 1 页</span>
+                <button id="followingNextPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">下一页</button>
+            </div>
+
+            <div id="followingList" style="max-height: 300px; overflow-y: auto; margin-top: 10px;"></div>
+        </div>
+
+        <!-- 点赞列表内容 -->
+        <div id="tabContentLiked" class="tab-content" style="display: none;">
+            <button id="loadLiked" class="btn btn-primary" disabled>刷新点赞列表</button>
+            <div id="likedStatus" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+
+            <!-- 搜索框 -->
+            <div style="margin-top: 10px;">
+                <input
+                        type="text"
+                        id="likedSearchInput"
+                        placeholder="搜索视频描述或作者..."
+                        style="width: 100%; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px;"
+                        disabled
+                >
+            </div>
+
+            <!-- ✅ 批量操作栏 -->
+            <div id="likedBatchActions" style="margin-top: 10px; padding: 8px; background: #f0f0f0; border-radius: 4px;">
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: nowrap;">
+                    <select id="likedBatchSelect" style="padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; min-width: 100px;">
+                        <option value="">-- 批量选择 --</option>
+                        <option value="current">当前页视频</option>
+                        <option value="all">所有视频</option>
+                    </select>
+                    <button class="batch-download-btn btn btn-primary" style="width: auto; padding: 4px 8px; font-size: 12px; white-space: nowrap;" disabled data-type="liked">
+                        ⬇️ 批量保存 (<span id="likedSelectedCount" class="selected-count">0</span>)
+                    </button>
+                    <button class="stop-download-btn btn btn-primary" style="width: auto; padding: 4px 8px; font-size: 12px; white-space: nowrap;" disabled>
+                        ⏹️ 批量停止
+                    </button>
+                </div>
+            </div>
+
+            <!-- 分页控件 -->
+            <div id="likedPagination" style="margin-top: 10px; text-align: center;">
+                <button id="likedPrevPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">上一页</button>
+                <span id="likedPageInfo" style="margin: 0 10px; font-size: 13px;">第 1 页</span>
+                <button id="likedNextPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">下一页</button>
+            </div>
+
+            <div id="likedList" style="max-height: 300px; overflow-y: auto; margin-top: 10px;"></div>
+        </div>
+
+        <!-- 收藏列表内容 -->
+        <div id="tabContentBookmarked" class="tab-content" style="display: none;">
+            <!-- 顶部控制区 -->
+            <button id="loadBookmarked" class="btn btn-primary" disabled>刷新收藏列表</button>
+            <div id="bookmarkedStatus" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+
+            <!-- 搜索框 -->
+            <div style="margin-top: 10px;">
+                <input
+                        type="text"
+                        id="bookmarkedSearchInput"
+                        placeholder="搜索视频描述或作者..."
+                        style="width: 100%; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px;"
+                        disabled
+                >
+            </div>
+
+            <!-- ✅ 批量操作栏 -->
+            <div id="bookmarkedBatchActions" style="margin-top: 10px; padding: 8px; background: #f0f0f0; border-radius: 4px;">
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: nowrap;">
+                    <select id="bookmarkedBatchSelect" style="padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; min-width: 100px;">
+                        <option value="">-- 批量选择 --</option>
+                        <option value="current">当前页视频</option>
+                        <option value="all">所有视频</option>
+                    </select>
+                    <button class="batch-download-btn btn btn-primary" style="width: auto; padding: 4px 8px; font-size: 12px; white-space: nowrap;" disabled data-type="bookmarked">
+                        ⬇️ 批量保存 (<span id="bookmarkedSelectedCount" class="selected-count">0</span>)
+                    </button>
+                    <button class="stop-download-btn btn btn-primary" style="width: auto; padding: 4px 8px; font-size: 12px; white-space: nowrap;" disabled>
+                        ⏹️ 批量停止
+                    </button>
+                </div>
+            </div>
+
+            <!-- ✅ 收藏夹多选标签组件 -->
+            <div id="collectsMultiSelect" style="display: none; margin-top: 10px; padding: 8px; background: #fafafa; border: 1px solid #e8e8e8; border-radius: 4px;">
+                <div style="display: flex; gap: 10px;">
+                    <!-- 左侧控制区 -->
+                    <div style="display: flex; flex-direction: column; gap: 6px; min-width: 150px; position: relative;">
+                        <!-- 自定义下拉触发器 -->
+                        <div id="collectsDropdownTrigger" style="padding: 4px 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; cursor: pointer; background: #fff; user-select: none; display: flex; justify-content: space-between; align-items: center;">
+                            <span>+ 选择收藏夹</span>
+                            <span style="font-size: 10px;">▼</span>
+                        </div>
+
+                        <!-- 下拉列表（默认隐藏） -->
+                        <div id="collectsDropdownList" style="display: none; position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; background: #fff; border: 1px solid #d9d9d9; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); max-height: 200px; overflow-y: auto; z-index: 100;">
+                            <!-- 动态生成选项 -->
+                        </div>
+
+                        <!-- 全选/清空按钮 -->
+                        <div style="display: flex; gap: 4px;">
+                            <button id="selectAllCollects" style="flex: 1; padding: 3px 8px; border: 1px solid #1890ff; background: #fff; color: #1890ff; border-radius: 3px; font-size: 11px; cursor: pointer;">全选</button>
+                            <button id="clearAllCollects" style="flex: 1; padding: 3px 8px; border: 1px solid #d9d9d9; background: #fff; color: #666; border-radius: 3px; font-size: 11px; cursor: pointer;">清空</button>
+                        </div>
+                    </div>
+
+                    <!-- 右侧已选标签容器 -->
+                    <div style="flex: 1; position: relative; height: 60px;">
+                        <!-- 标签显示框 -->
+                        <div id="collectsTagsContainer" style="position: relative; height: 60px; padding: 6px; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff; display: flex; gap: 4px; flex-wrap: wrap; align-content: flex-start; overflow-y: auto; cursor: pointer; transition: all 0.2s ease;">
+                            <!-- 动态生成标签 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ✅ 收藏夹提示说明 -->
+            <div id="collectsTip" style="display: none; margin-top: 8px; padding: 6px 10px; background: #fff7e6; border-left: 3px solid #faad14; border-radius: 4px; font-size: 11px; color: #d46b08; line-height: 1.5;">
+                💡 显示数量可能与实际不符（部分视频可能已失效）
+            </div>
+
+            <!-- ✅ 收藏列表区域（包含分页和视频列表） -->
+            <div style="margin-top: 10px; display: flex; flex-direction: column; height: 300px;">
+                <!-- 分页控件 -->
+                <div id="bookmarkedPagination" style="text-align: center; padding: 5px 0;">
+                    <button id="bookmarkedPrevPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">上一页</button>
+                    <span id="bookmarkedPageInfo" style="margin: 0 10px; font-size: 13px;">第 1 页</span>
+                    <button id="bookmarkedNextPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">下一页</button>
+                </div>
+
+                <!-- 视频列表 -->
+                <div id="bookmarkedList" style="flex: 1; overflow-y: auto;"></div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- 日志 -->
+    <div class="section">
+        <div class="section-title">📝 操作日志</div>
+        <div id="logArea" class="log-area"></div>
+    </div>
+</div>
+
+<script type="module" src="../../core/app.js"></script>
+
+</body>
+</html>

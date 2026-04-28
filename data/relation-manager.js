@@ -1,0 +1,275 @@
+// ==========================================
+// FavGallery - 通用关系管理器
+// 职责：管理 works、authors、collects 等实体之间的关系
+// ==========================================
+
+import { database } from './database.js';
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('RelationManager');
+
+/**
+ * 生成关系 ID
+ * @param {string} sourceType - 来源类型
+ * @param {string} sourceId - 来源ID
+ * @param {string} targetType - 目标类型
+ * @param {string} targetId - 目标ID
+ * @returns {string} 复合主键
+ */
+function generateRelationId(sourceType, sourceId, targetType, targetId) {
+    return `${sourceType}_${sourceId}_${targetType}_${targetId}`;
+}
+
+/**
+ * 批量添加关系
+ * @param {Array<Object>} relations - 关系数组
+ * @returns {Promise<void>}
+ */
+export async function batchAddRelations(relations) {
+    const items = relations.map(rel => ({
+        id: generateRelationId(rel.sourceType, rel.sourceId, rel.targetType, rel.targetId),
+        ...rel,
+        createTime: Date.now()
+    }));
+
+    try {
+        await database.save('relations', items);
+        logger.info(`✅ 批量添加关系: ${items.length} 条`);
+    } catch (err) {
+        logger.error(`❌ 批量添加关系失败`, err);
+        throw err;
+    }
+}
+
+/**
+ * 查询某实体的所有入边关系（作为目标）
+ * @param {string} targetType - 目标类型
+ * @param {string} targetId - 目标ID
+ * @returns {Promise<Array>} 关系数组
+ */
+export async function getIncomingRelations(targetType, targetId) {
+    try {
+        const relations = await database.getByIndex(
+            'relations',
+            'target',
+            [targetType, targetId]
+        );
+        return relations || [];
+    } catch (err) {
+        logger.error(`❌ 查询入边关系失败: ${targetType}:${targetId}`, err);
+        throw err;
+    }
+}
+
+/**
+ * 获取收藏夹的所有作品ID
+ * @param {string} collectId - 收藏夹ID
+ * @returns {Promise<Array<string>>} 作品ID数组
+ */
+export async function getCollectWorkIds(collectId) {
+    const relations = await getIncomingRelations('collect', collectId);
+    return relations
+        .filter(r => r.sourceType === 'work')
+        .map(r => r.sourceId);
+}
+
+// ⚠️ 预留功能 - 用于精细化的关系管理
+/**
+ * 删除关系
+ * @param {string} sourceType - 来源类型
+ * @param {string} sourceId - 来源ID
+ * @param {string} targetType - 目标类型
+ * @param {string} targetId - 目标ID
+ * @returns {Promise<void>}
+ */
+export async function removeRelation(sourceType, sourceId, targetType, targetId) {
+    const id = generateRelationId(sourceType, sourceId, targetType, targetId);
+
+    try {
+        await database.delete('relations', id);
+        logger.debug(`🗑️ 删除关系: ${id}`);
+    } catch (err) {
+        logger.error(`❌ 删除关系失败: ${id}`, err);
+        throw err;
+    }
+}
+
+// ⚠️ 预留功能 - 用于存在性检查
+/**
+ * 检查关系是否存在
+ * @param {string} sourceType - 来源类型
+ * @param {string} sourceId - 来源ID
+ * @param {string} targetType - 目标类型
+ * @param {string} targetId - 目标ID
+ * @returns {Promise<boolean>} 是否存在
+ */
+export async function hasRelation(sourceType, sourceId, targetType, targetId) {
+    // TODO: 需要实现 getRelation 或使用其他方式查询
+    // 当前简化实现，未来可优化
+    try {
+        const relations = await getIncomingRelations(targetType, targetId);
+        return relations.some(r => r.sourceType === sourceType && r.sourceId === sourceId);
+    } catch (err) {
+        logger.error(`❌ 检查关系失败`, err);
+        return false;
+    }
+}
+
+// ⚠️ 预留功能 - 用于完整性检查
+/**
+ * 获取作者所有作品ID
+ * @param {string} uid - 作者UID
+ * @returns {Promise<Array<string>>} 作品ID数组
+ */
+export async function getAuthorWorkIds(uid) {
+    const relations = await getIncomingRelations('author', uid);
+    return relations
+        .filter(r => r.sourceType === 'work')
+        .map(r => r.sourceId);
+}
+
+// ⚠️ 预留功能 - 用于反向查询
+/**
+ * 获取作品所属的收藏夹ID列表
+ * @param {string} workId - 作品ID
+ * @returns {Promise<Array<string>>} 收藏夹ID列表
+ */
+export async function getWorkCollectIds(workId) {
+    // TODO: 需要实现 getOutgoingRelations 或使用其他方式查询
+    // 当前简化实现，未来可优化
+    try {
+        const allRelations = await database.getAll('relations');
+        return allRelations
+            .filter(r => r.sourceType === 'work' && r.sourceId === workId && r.targetType === 'collect')
+            .map(r => r.targetId);
+    } catch (err) {
+        logger.error(`❌ 获取作品收藏夹失败`, err);
+        return [];
+    }
+}
+
+// ⚠️ 预留功能 - 用于清理取消点赞/收藏的关系
+/**
+ * 删除作品及其所有关系
+ * @param {string} workId - 作品ID
+ * @returns {Promise<void>}
+ */
+export async function deleteWorkWithRelations(workId) {
+    try {
+        // 删除作品记录
+        await database.delete('works', workId);
+        await database.delete('completed_works', workId);
+        
+        // 删除所有相关关系
+        const allRelations = await database.getAll('relations');
+        const relationsToDelete = allRelations.filter(r => 
+            r.sourceType === 'work' && r.sourceId === workId
+        );
+        
+        for (const relation of relationsToDelete) {
+            await database.delete('relations', relation.id);
+        }
+        
+        logger.info(`🗑️ 删除作品及关系: ${workId}`);
+    } catch (err) {
+        logger.error(`❌ 删除作品失败: ${workId}`, err);
+        throw err;
+    }
+}
+
+// ⚠️ 预留功能 - 用于 UI 进度显示
+/**
+ * 计算作者的下载进度
+ * @param {string} uid - 作者UID
+ * @returns {Promise<Object>} 下载进度信息
+ */
+export async function calculateAuthorProgress(uid) {
+    try {
+        const workIds = await getAuthorWorkIds(uid);
+
+        if (workIds.length === 0) {
+            return {
+                uid,
+                downloadedCount: 0,
+                totalCount: 0,
+                isPartial: false,
+                downloadedWorkIds: []
+            };
+        }
+
+        const downloadedWorkIds = [];
+        for (const workId of workIds) {
+            const completed = await database.get('completed_works', workId);
+            if (completed) {
+                downloadedWorkIds.push(workId);
+            }
+        }
+
+        return {
+            uid,
+            downloadedWorkIds,
+            downloadedCount: downloadedWorkIds.length,
+            totalCount: workIds.length,
+            isPartial: downloadedWorkIds.length > 0 && downloadedWorkIds.length < workIds.length
+        };
+    } catch (err) {
+        logger.error(`❌ 计算作者进度失败: ${uid}`, err);
+        throw err;
+    }
+}
+
+// ⚠️ 预留功能 - 用于 UI 进度显示
+/**
+ * 计算收藏夹的下载进度
+ * @param {string} collectId - 收藏夹ID
+ * @returns {Promise<Object>} 下载进度信息
+ */
+export async function calculateCollectProgress(collectId) {
+    try {
+        const workIds = await getCollectWorkIds(collectId);
+
+        if (workIds.length === 0) {
+            return {
+                collects_id: collectId,
+                downloadedCount: 0,
+                totalCount: 0,
+                isPartial: false,
+                downloadedWorkIds: []
+            };
+        }
+
+        const downloadedWorkIds = [];
+        for (const workId of workIds) {
+            const completed = await database.get('completed_works', workId);
+            if (completed) {
+                downloadedWorkIds.push(workId);
+            }
+        }
+
+        return {
+            collects_id: collectId,
+            downloadedWorkIds,
+            downloadedCount: downloadedWorkIds.length,
+            totalCount: workIds.length,
+            isPartial: downloadedWorkIds.length > 0 && downloadedWorkIds.length < workIds.length
+        };
+    } catch (err) {
+        logger.error(`❌ 计算收藏夹进度失败: ${collectId}`, err);
+        throw err;
+    }
+}
+
+
+// 导出默认对象
+export default {
+    batchAddRelations,
+    removeRelation,
+    getIncomingRelations,
+    hasRelation,
+    getAuthorWorkIds,
+    getWorkCollectIds,
+    getCollectWorkIds,
+    deleteWorkWithRelations,
+    calculateAuthorProgress,
+    calculateCollectProgress
+};
