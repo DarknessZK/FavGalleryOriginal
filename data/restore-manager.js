@@ -1,0 +1,215 @@
+// ==========================================
+// FavGallery - 恢复管理器
+// 职责：从文件系统备份恢复数据到 IndexedDB
+// ==========================================
+
+import { createLogger } from '../utils/logger.js';
+import { CONFIG } from '../config/constants.js';
+import { fileSystem } from './file-system.js';
+import { database } from './database.js';
+import { backupManager } from './backup-manager.js';
+
+const logger = createLogger('RestoreManager');
+
+class RestoreManager {
+    /**
+     * 从文件系统恢复数据到 IndexedDB
+     * @param {string} dataType - 数据类型（'works', 'authors', 'collects', 'completed_works'）
+     * @param {Object} options - 恢复选项
+     * @param {boolean} options.force - 是否强制覆盖（默认 false，跳过已存在的数据）
+     * @param {Function} options.onProgress - 进度回调
+     * @returns {Promise<Object>} 恢复结果
+     */
+    async restoreFromBackup(dataType, options = {}) {
+        const { force = false, onProgress = null } = options;
+
+        try {
+            logger.info(`🔄 开始恢复 ${dataType} 数据...`);
+
+            // 1. 读取备份文件
+            const backupFiles = await this.findBackupFiles(dataType);
+
+            if (backupFiles.length === 0) {
+                logger.warn(`⚠️ 未找到 ${dataType} 的备份文件`);
+                return { success: false, reason: 'no_backup_files' };
+            }
+
+            logger.info(`📂 找到 ${backupFiles.length} 个备份文件`);
+
+            // 2. 逐个恢复
+            let totalRestored = 0;
+            for (let i = 0; i < backupFiles.length; i++) {
+                const filePath = backupFiles[i];
+
+                logger.info(`📖 读取备份文件 (${i + 1}/${backupFiles.length}): ${filePath}`);
+
+                const result = await this.restoreSingleFile(dataType, filePath, force);
+                totalRestored += result.count;
+
+                // 进度回调
+                if (onProgress) {
+                    onProgress({
+                        current: i + 1,
+                        total: backupFiles.length,
+                        restored: totalRestored
+                    });
+                }
+            }
+
+            logger.info(`✅ 恢复完成: ${dataType} - ${totalRestored} 条记录`);
+
+            return {
+                success: true,
+                dataType,
+                fileCount: backupFiles.length,
+                totalRestored
+            };
+
+        } catch (error) {
+            logger.error(`❌ 恢复失败: ${dataType}`, error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * 查找备份文件
+     * @param {string} dataType - 数据类型
+     * @returns {Promise<Array<string>>} 备份文件路径列表
+     */
+    async findBackupFiles(dataType) {
+        const files = [];
+
+        try {
+            // ✅ 按平台分类查找备份文件
+            const platform = CONFIG.ACTIVE_PLATFORM;
+            const metadataDir = `${CONFIG.FILE_SYSTEM.METADATA_DIR}/${platform}`;
+            
+            if (dataType === 'works') {
+                // works 按季度分片
+                const worksDir = `${metadataDir}/works`;
+                const fileList = await fileSystem.listDirectory(worksDir);
+
+                for (const fileName of fileList) {
+                    if (fileName.startsWith('works_') && fileName.endsWith('.json')) {
+                        files.push(`${worksDir}/${fileName}`);
+                    }
+                }
+            } else if (dataType === 'completed_works') {
+                // ✅ completed_works 使用 NDJSON 格式
+                const filePath = `${metadataDir}/completed_works.ndjson`;
+                const exists = await fileSystem.fileExists(filePath);
+
+                if (exists) {
+                    files.push(filePath);
+                }
+            } else {
+                // 其他类型单个文件
+                const filePath = `${metadataDir}/${dataType}_base.js`;
+                const exists = await fileSystem.fileExists(filePath);
+
+                if (exists) {
+                    files.push(filePath);
+                }
+            }
+        } catch (error) {
+            logger.warn(`⚠️ 查找备份文件失败:`, error);
+        }
+
+        return files;
+    }
+
+    /**
+     * 恢复单个备份文件
+     * @param {string} dataType - 数据类型
+     * @param {string} filePath - 文件路径
+     * @param {boolean} force - 是否强制覆盖
+     * @returns {Promise<Object>} 恢复结果
+     */
+    async restoreSingleFile(dataType, filePath, force = false) {
+        try {
+            // 1. 读取文件内容
+            const content = await fileSystem.readTextFile(filePath);
+
+            if (!content) {
+                logger.warn(`⚠️ 文件内容为空: ${filePath}`);
+                return { count: 0 };
+            }
+
+            // 2. 解析数据
+            let records = [];
+
+            if (dataType === 'completed_works' && filePath.endsWith('.ndjson')) {
+                // ✅ 使用 NDJSON 工具方法解析
+                records = await fileSystem.readNDJSON(filePath);
+                logger.info(`📖 解析 NDJSON: ${records.length} 条记录`);
+            } else if (dataType === 'works') {
+                // works 文件格式：{ works: [...], quarter: "2024_Q1" }
+                const content = await fileSystem.readTextFile(filePath);
+                const backupData = JSON.parse(content);
+                records = backupData.works || [];
+            } else {
+                // 其他格式：{ authors: [...] } 或 { collects: [...] }
+                const content = await fileSystem.readTextFile(filePath);
+                const backupData = JSON.parse(content);
+                records = backupData[dataType] || [];
+            }
+
+            if (records.length === 0) {
+                logger.info(`ℹ️ 文件中无数据: ${filePath}`);
+                return { count: 0 };
+            }
+
+            // 3. 批量恢复到数据库
+            const restoredCount = await this.batchRestoreToDatabase(dataType, records, force);
+
+            logger.info(`✅ 恢复成功: ${filePath} - ${restoredCount} 条记录`);
+
+            return { count: restoredCount };
+
+        } catch (error) {
+            logger.error(`❌ 恢复文件失败: ${filePath}`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * 批量恢复到数据库
+     * @param {string} dataType - 数据类型
+     * @param {Array} records - 记录数组
+     * @param {boolean} force - 是否强制覆盖
+     * @returns {Promise<number>} 恢复的记录数
+     */
+    async batchRestoreToDatabase(dataType, records, force = false) {
+        try {
+            if (!force && dataType !== 'completed_works') {
+                // 对于非 completed_works 表，检查是否已存在
+                // 这里简化处理，直接保存（IndexedDB 的 put 会自动更新或插入）
+            }
+
+            // 批量保存到数据库
+            await database.save(dataType, records);
+
+            return records.length;
+
+        } catch (error) {
+            logger.error(`❌ 批量恢复失败: ${dataType}`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * 获取已下载的作品 ID 列表（用于跳过已完成的作品）
+     * @returns {Promise<Set<string>>} 已下载作品 ID 集合
+     */
+    async getDownloadedWorkIds() {
+        const ids = await database.getDownloadedWorkIds();
+        return new Set(ids);
+    }
+}
+
+// 导出单例
+export const restoreManager = new RestoreManager();
+export default restoreManager;

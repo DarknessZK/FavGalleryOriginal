@@ -1,0 +1,93 @@
+{
+  "manifest_version": 3,
+  "name": "FavGallery - 数字收藏馆",
+  "version": "1.0.0",
+  "description": "帮助用户管理和备份个人社交平台的收藏内容",
+
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  },
+
+  "action": {
+    "default_title": "打开 FavGallery",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png"
+    }
+  },
+
+  "permissions": [
+    "storage",
+    "unlimitedStorage"
+  ],
+
+  "host_permissions": [
+    "https://www.douyin.com/*",
+    "https://*.douyinpic.com/*",
+    "https://*.douyinvod.com/*",
+    "https://www.xiaohongshu.com/*",
+    "https://*.xiaohongshu.com/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://www.douyin.com/*"],
+      "js": ["content/index.js"],
+      "all_frames": false
+    },
+    {
+      "matches": ["https://www.xiaohongshu.com/*"],
+      "js": ["content/index.js"],
+      "all_frames": false
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/main.js",
+        "ui/html/sidebar.html",
+        "ui/css/sidebar.css",
+        "config/constants.js",
+        "api/platform-adapter.js",
+        "api/douyin/api.js",
+        "api/douyin/config.js",
+        "api/douyin/helpers.js",
+        "data/database.js",
+        "data/file-system.js",
+        "data/relation-manager.js",
+        "data/backup-manager.js",
+        "data/restore-manager.js",
+        "data/index.js",
+        "download/single-downloader.js",
+        "download/batch-download-manager.js",
+        "download/download-lock.js",
+        "download/page-downloader.js",
+        "utils/logger.js",
+        "utils/file-logger.js",
+        "utils/helpers.js",
+        "utils/platform-helpers.js",
+        "utils/ui-helpers.js",
+        "utils/path-helpers.js",
+        "utils/work-helpers.js",
+        "utils/work-list-manager.js",
+        "content/services/data-fetcher.js",
+        "content/services/download-service.js",
+        "core/app.js",
+        "core/message-handler.js",
+        "core/event-binder.js",
+        "core/list-display-manager.js",
+        "core/batch-selection-manager.js",
+        "ui/tab-manager.js",
+        "ui/ui-state-manager.js"
+      ],
+      "matches": ["https://www.douyin.com/*", "https://www.xiaohongshu.com/*"]
+    }
+  ]
+}
