@@ -137,7 +137,7 @@ export class UIStateManager {
             logToUI('warning', `🔒 下载中，已禁用切换: ${disabledTabs.join('、')}`);
         }
         
-        // ✅ 3. 禁用所有批量下载按钮和停止下载按钮
+        // ✅ 3. 禁用所有批量下载按钮
         document.querySelectorAll('.batch-download-btn').forEach(btn => {
             btn.disabled = true;
             btn.style.opacity = '0.5';
@@ -145,11 +145,26 @@ export class UIStateManager {
             btn.title = '保存进行中，请稍候...';
         });
         
-        document.querySelectorAll('.stop-download-btn').forEach(btn => {
-            btn.disabled = true;
-            btn.style.opacity = '0.5';
-            btn.style.cursor = 'not-allowed';
+        // ✅ 4. 禁用分页按钮（防止下载时翻页导致状态混乱）
+        const paginationButtonIds = [
+            'likedPrevPage', 'likedNextPage',
+            'bookmarkedPrevPage', 'bookmarkedNextPage',
+            'followingPrevPage', 'followingNextPage'
+        ];
+        
+        paginationButtonIds.forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) {
+                btn.disabled = true;
+                btn.style.opacity = '0.5';
+                btn.style.cursor = 'not-allowed';
+                btn.title = '保存进行中，请稍候...';
+            }
         });
+        
+        // ✅ 注意：停止按钮的状态由调用方控制
+        // - 单个作品下载：保持禁用状态（不做处理）
+        // - 批量下载：需要在调用 disableAllControlButtons() 后手动启用
         
         logger.info('🔒 已禁用所有控制按钮（包括 Tab 切换和批量操作）');
     }
@@ -198,7 +213,32 @@ export class UIStateManager {
             logToUI('success', `🔓 已恢复切换: ${enabledTabs.join('、')}`);
         }
         
-        logger.info('🔓 已启用所有控制按钮（包括 Tab 切换）');
+        // ✅ 3. 启用分页按钮
+        const paginationButtonIds = [
+            'likedPrevPage', 'likedNextPage',
+            'bookmarkedPrevPage', 'bookmarkedNextPage',
+            'followingPrevPage', 'followingNextPage'
+        ];
+        
+        paginationButtonIds.forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+                btn.title = '';
+            }
+        });
+        
+        // ✅ 4. 禁用停止下载按钮（下载已完成）
+        document.querySelectorAll('.stop-download-btn').forEach(btn => {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.style.cursor = 'not-allowed';
+            btn.title = '';
+        });
+        
+        logger.info('🔓 已启用所有控制按钮（包括 Tab 切换和分页）');
     }
     
     /**
@@ -221,14 +261,33 @@ export class UIStateManager {
      */
     enableAllWorkDownloadButtons() {
         const downloadBtns = document.querySelectorAll('.download-btn');
+        
         downloadBtns.forEach(btn => {
-            // 恢复 pending/failed/error 状态的按钮
-            if (btn.textContent.includes('保存') || 
-                btn.textContent.includes('重试') || 
-                btn.textContent.includes('异常')) {
-                btn.disabled = false;
-                btn.style.opacity = '1';
-                btn.style.cursor = 'pointer';
+            const text = btn.textContent.trim();
+            const isCompleted = text.includes('已保存');
+            const workId = btn.getAttribute('data-work-id');
+            
+            // 恢复所有未完成的按钮（除了"已保存"状态）
+            if (!isCompleted) {
+                // ✅ 将"等待中"状态的按钮恢复到初始状态
+                if (text.includes('等待中')) {
+                    btn.innerHTML = '<span style="display: block; text-align: center;">💾 保存</span>';
+                    btn.style.background = '#1890ff';  // 蓝色
+                    btn.style.cursor = 'pointer';
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                    btn.title = '';
+                } else {
+                    // 其他状态（failed/error）只需启用
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                    btn.style.cursor = 'pointer';
+                }
+                
+                // ✅ 同时恢复对应的复选框
+                if (workId) {
+                    this.enableWorkCheckbox(workId);
+                }
             }
         });
     }
@@ -343,6 +402,19 @@ export class UIStateManager {
             checkbox.style.cursor = 'not-allowed';
         }
     }
+    
+    /**
+     * 启用作品对应的复选框（停止下载后调用）
+     * @param {string} workId - 作品ID
+     */
+    enableWorkCheckbox(workId) {
+        const checkbox = document.querySelector(`.work-checkbox[data-work-id="${workId}"]`);
+        if (checkbox) {
+            checkbox.disabled = false;
+            checkbox.style.opacity = '1';
+            checkbox.style.cursor = 'pointer';
+        }
+    }
 
     /**
      * 设置下载状态（启用/禁用按钮）
@@ -366,28 +438,6 @@ export class UIStateManager {
         // ✅ 委托给 BatchSelectionManager
         if (this.app.batchSelectionManager) {
             this.app.batchSelectionManager.updateBatchSelectionUI(listType);
-        }
-    }
-
-    /**
-     * 选择当前页（已废弃，使用 batchSelectionManager）
-     * @deprecated 使用 batchSelectionManager.handleBatchSelectionChange
-     */
-    selectAllCurrentPage() {
-        logger.warn('⚠️ selectAllCurrentPage 已废弃，请使用 batchSelectionManager');
-        if (this.app.batchSelectionManager) {
-            this.app.batchSelectionManager.handleBatchSelectionChange(this.app.currentActiveTab, 'current');
-        }
-    }
-
-    /**
-     * 选择全部视频（已废弃，使用 batchSelectionManager）
-     * @deprecated 使用 batchSelectionManager.handleBatchSelectionChange
-     */
-    selectAllVideos() {
-        logger.warn('⚠️ selectAllVideos 已废弃，请使用 batchSelectionManager');
-        if (this.app.batchSelectionManager) {
-            this.app.batchSelectionManager.handleBatchSelectionChange(this.app.currentActiveTab, 'all');
         }
     }
 

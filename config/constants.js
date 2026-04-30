@@ -239,13 +239,13 @@ export const CONFIG = {
             minDelay: 3000,
             
             /** 作品间最大延迟（毫秒）- 防封号 */
-            maxDelay: 7000,
+            maxDelay: 6000,
             
             /** 单个作品最大重试次数 */
             maxRetries: 2,
             
             /** 重试延迟基数（毫秒）- 指数退避：retryDelayBase * retryCount */
-            retryDelayBase: 7000,
+            retryDelayBase: 6000,
             
             /** 批次任务超时时间（毫秒）- 0 表示不超时 */
             timeout: 0
@@ -255,8 +255,8 @@ export const CONFIG = {
          * 单个作品下载配置
          */
         single: {
-            /** 下载超时时间（毫秒）- 5分钟 */
-            timeout: 5 * 60 * 1000,
+            /** 下载超时时间（毫秒）- 3分钟 */
+            timeout: 3 * 60 * 1000,
             
             /** 是否启用断点续传（检查文件是否存在） */
             enableResume: true,

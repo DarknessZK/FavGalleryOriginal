@@ -9,6 +9,7 @@ import { database } from './database.js';
 import { createLogger } from '../utils/logger.js';
 import { initFileLogger } from '../utils/file-logger.js';
 import * as relationManager from './relation-manager.js';
+import { sanitizeForFileSystem } from '../utils/helpers.js';
 
 const logger = createLogger('FileSystem');
 
@@ -170,7 +171,9 @@ class FileSystem {
         let currentHandle = parentHandle;
 
         for (const part of parts) {
-            currentHandle = await currentHandle.getDirectoryHandle(part, { create: true });
+            // ✅ 防御性检查：清理目录名中的非法字符
+            const safePart = sanitizeForFileSystem(part);
+            currentHandle = await currentHandle.getDirectoryHandle(safePart, { create: true });
         }
 
         return currentHandle;

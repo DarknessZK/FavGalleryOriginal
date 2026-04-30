@@ -7,6 +7,7 @@ import { createLogger } from '../utils/logger.js';
 import { CONFIG } from '../config/constants.js';
 import { PageDownloader } from './page-downloader.js';
 import { platformAPI } from '../api/platform-adapter.js';
+import { sanitizeForFileSystem } from '../utils/helpers.js';
 
 const logger = createLogger('SingleDownloader');
 
@@ -48,7 +49,8 @@ export class SingleDownloader {
                         success: true,
                         workId: work.workId,
                         skipped: true,
-                        reason: '文件已存在'
+                        reason: '文件已存在',
+                        fileSize: 0  // ✅ 跳过时返回 0
                     };
                 }
             }
@@ -89,7 +91,8 @@ export class SingleDownloader {
             return {
                 success: false,
                 workId: work.workId,
-                error: error.message || String(error)
+                error: error.message || String(error),
+                fileSize: 0  // ✅ 失败时返回 0
             };
         }
     }
@@ -141,14 +144,16 @@ export class SingleDownloader {
             });
 
             // ✅ 保存文件到文件系统
+            let fileSize = 0;
             if (result.success) {
-                await this.saveVideoFiles(result, folderPath, workDetail);
+                fileSize = await this.saveVideoFiles(result, folderPath, workDetail);
             }
 
             return {
                 success: result.success,
                 workId: workDetail.workId,
-                error: result.error
+                error: result.error,
+                fileSize  // ✅ 返回文件大小
             };
         } catch (error) {
             logger.error(`❌ 视频下载失败: ${workDetail.workId}`, error);
@@ -199,14 +204,16 @@ export class SingleDownloader {
             });
 
             // ✅ 保存文件到文件系统
+            let fileSize = 0;
             if (result.success) {
-                await this.saveImagePostFiles(result, folderPath, workDetail);
+                fileSize = await this.saveImagePostFiles(result, folderPath, workDetail);
             }
 
             return {
                 success: result.success,
                 workId: workDetail.workId,
-                error: result.error
+                error: result.error,
+                fileSize  // ✅ 返回文件大小
             };
         } catch (error) {
             logger.error(`❌ 图集下载失败: ${workDetail.workId}`, error);
@@ -227,13 +234,16 @@ export class SingleDownloader {
 
     /**
      * 保存视频文件
+     * @returns {number} 文件大小（字节）
      */
     async saveVideoFiles(result, folderPath, work) {
         try {
             const { videoBlob, coverBlob } = result;
+            let fileSize = 0;
 
             // ✅ 保存视频文件（Blob）
             if (videoBlob) {
+                fileSize = videoBlob.size;  // ✅ 提取文件大小
                 const videoPath = this.generateVideoPath(work.workId, folderPath, work);
                 await this.fileSystem.saveBlobFile(videoPath, videoBlob);
                 logger.info(`✅ 视频保存成功（Blob）: ${work.workId}`);
@@ -247,6 +257,7 @@ export class SingleDownloader {
             }
 
             logger.info(`✅ 视频保存成功: ${work.workId}`);
+            return fileSize;  // ✅ 返回文件大小
         } catch (error) {
             logger.error(`❌ 保存视频文件失败: ${work.workId}`, error);
             throw error;
@@ -255,10 +266,12 @@ export class SingleDownloader {
 
     /**
      * 保存图集文件
+     * @returns {number} 总文件大小（字节）
      */
     async saveImagePostFiles(result, folderPath, work) {
         try {
             const { imageBlobs, musicBlob } = result;
+            let totalSize = 0;
 
             // ✅ 验证 imageBlobs 是否为数组
             if (!imageBlobs || !Array.isArray(imageBlobs)) {
@@ -281,6 +294,7 @@ export class SingleDownloader {
                     throw new Error(`第 ${i + 1} 张图片数据格式错误`);
                 }
                 
+                totalSize += blob.size;  // ✅ 累加文件大小
                 logger.info(`💾 保存第 ${i + 1} 张图片: ${blob.size} bytes, type: ${blob.type}`);
                 
                 const imagePath = this.generateImagePath(
@@ -296,6 +310,7 @@ export class SingleDownloader {
 
             // ✅ 保存音频（Blob）
             if (musicBlob) {
+                totalSize += musicBlob.size;  // ✅ 累加音乐文件大小
                 logger.info(`💾 保存音频: ${musicBlob.size} bytes, type: ${musicBlob.type}`);
                 const musicPath = this.generateMusicPath(work.workId, folderPath, work);
                 await this.fileSystem.saveBlobFile(musicPath, musicBlob);
@@ -303,6 +318,7 @@ export class SingleDownloader {
             }
 
             logger.info(`✅ 图集保存成功: ${work.workId} (${imageBlobs.length} 张图片)`);
+            return totalSize;  // ✅ 返回总文件大小
         } catch (error) {
             logger.error(`❌ 保存图集文件失败: ${work.workId}`, error);
             throw error;
@@ -393,8 +409,11 @@ export class SingleDownloader {
         const nickname = author.nickname || '未知用户';
         const uid = author.uid || author.platformId || 'unknown';
         
+        // ✅ 清理昵称中的非法文件名字符（Windows 不允许: < > : " / \ | ? *）
+        const safeNickname = sanitizeForFileSystem(nickname);
+        
         // ✅ 格式：深渊龙宝宝(106606479711)
-        return `${nickname}(${uid})`;
+        return `${safeNickname}(${uid})`;
     }
 
     /**

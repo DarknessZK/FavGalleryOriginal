@@ -87,6 +87,8 @@ class RestoreManager {
             const platform = CONFIG.ACTIVE_PLATFORM;
             const metadataDir = `${CONFIG.FILE_SYSTEM.METADATA_DIR}/${platform}`;
             
+            logger.info(`🔍 查找 ${dataType} 备份文件，目录: ${metadataDir}`);
+            
             if (dataType === 'works') {
                 // works 按季度分片
                 const worksDir = `${metadataDir}/works`;
@@ -103,7 +105,10 @@ class RestoreManager {
                 const exists = await fileSystem.fileExists(filePath);
 
                 if (exists) {
+                    logger.info(`✅ 找到备份文件: ${filePath}`);
                     files.push(filePath);
+                } else {
+                    logger.info(`ℹ️ 备份文件不存在: ${filePath}`);
                 }
             } else {
                 // 其他类型单个文件
@@ -111,11 +116,19 @@ class RestoreManager {
                 const exists = await fileSystem.fileExists(filePath);
 
                 if (exists) {
+                    logger.info(`✅ 找到备份文件: ${filePath}`);
                     files.push(filePath);
+                } else {
+                    logger.info(`ℹ️ 备份文件不存在: ${filePath}`);
                 }
             }
         } catch (error) {
-            logger.warn(`⚠️ 查找备份文件失败:`, error);
+            // ✅ Sidebar 上下文中 fileSystem 可能未设置根目录，这是正常情况
+            if (error.message && error.message.includes('未设置根目录句柄')) {
+                logger.info(`ℹ️ ${dataType} 恢复跳过：当前上下文无法访问文件系统`);
+            } else {
+                logger.error(`❌ 查找备份文件失败:`, error);
+            }
         }
 
         return files;
@@ -130,13 +143,17 @@ class RestoreManager {
      */
     async restoreSingleFile(dataType, filePath, force = false) {
         try {
+            logger.info(`📖 开始读取备份文件: ${filePath}`);
+            
             // 1. 读取文件内容
             const content = await fileSystem.readTextFile(filePath);
 
             if (!content) {
-                logger.warn(`⚠️ 文件内容为空: ${filePath}`);
+                logger.warn(`⚠️ 文件内容为空或不存在: ${filePath}`);
                 return { count: 0 };
             }
+            
+            logger.info(`📄 文件大小: ${content.length} 字符`);
 
             // 2. 解析数据
             let records = [];
@@ -147,12 +164,10 @@ class RestoreManager {
                 logger.info(`📖 解析 NDJSON: ${records.length} 条记录`);
             } else if (dataType === 'works') {
                 // works 文件格式：{ works: [...], quarter: "2024_Q1" }
-                const content = await fileSystem.readTextFile(filePath);
                 const backupData = JSON.parse(content);
                 records = backupData.works || [];
             } else {
                 // 其他格式：{ authors: [...] } 或 { collects: [...] }
-                const content = await fileSystem.readTextFile(filePath);
                 const backupData = JSON.parse(content);
                 records = backupData[dataType] || [];
             }
@@ -163,6 +178,7 @@ class RestoreManager {
             }
 
             // 3. 批量恢复到数据库
+            logger.info(`💾 开始批量恢复 ${records.length} 条记录到 ${dataType}...`);
             const restoredCount = await this.batchRestoreToDatabase(dataType, records, force);
 
             logger.info(`✅ 恢复成功: ${filePath} - ${restoredCount} 条记录`);
@@ -198,15 +214,6 @@ class RestoreManager {
             logger.error(`❌ 批量恢复失败: ${dataType}`, error);
             throw error;
         }
-    }
-
-    /**
-     * 获取已下载的作品 ID 列表（用于跳过已完成的作品）
-     * @returns {Promise<Set<string>>} 已下载作品 ID 集合
-     */
-    async getDownloadedWorkIds() {
-        const ids = await database.getDownloadedWorkIds();
-        return new Set(ids);
     }
 }
 
