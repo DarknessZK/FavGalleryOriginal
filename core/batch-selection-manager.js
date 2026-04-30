@@ -277,19 +277,17 @@ class BatchSelectionManager {
                             listType === 'bookmarked' ? 'tabContentBookmarked' : 
                             'tabContentFollowing';
         
-        logger.info(`🔍 syncCheckboxes: listType=${listType}, selectedIds.length=${selectedIds.length}`);
-        
         // ✅ 延迟执行，确保 DOM 已完全渲染
         setTimeout(() => {
             const checkboxes = document.querySelectorAll(`#${tabContentId} .work-checkbox`);
-            logger.info(`🔍 找到 ${checkboxes.length} 个 checkbox`);
             
             checkboxes.forEach(checkbox => {
                 const itemId = checkbox.dataset.workId;
                 const shouldBeChecked = selectedIds.includes(itemId);
-                checkbox.checked = shouldBeChecked;
-                if (shouldBeChecked) {
-                    logger.info(`🔍 设置 checkbox ${itemId} 为 checked`);
+                
+                // ✅ 只更新未禁用的 checkbox 的 checked 状态
+                if (!checkbox.disabled) {
+                    checkbox.checked = shouldBeChecked;
                 }
             });
         }, 100);

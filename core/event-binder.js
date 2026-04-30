@@ -312,11 +312,28 @@ class EventBinder {
      */
     bindBookmarkedBatchOperations() {
         const bookmarkedBatchSelect = document.getElementById('bookmarkedBatchSelect');
+        const bookmarkedBatchDownloadBtn = document.querySelector('.batch-download-btn[data-type="bookmarked"]');
+        const bookmarkedStopDownloadBtn = document.querySelector('#tabContentBookmarked .stop-download-btn');
+
         if (bookmarkedBatchSelect) {
             bookmarkedBatchSelect.addEventListener('change', (event) => {
                 this.app.handleBatchSelectionChange('bookmarked', event.target.value);
             });
             logger.info('✅ 已绑定: 收藏列表批量选择下拉框');
+        }
+
+        if (bookmarkedBatchDownloadBtn) {
+            bookmarkedBatchDownloadBtn.addEventListener('click', () => {
+                this.app.handleBatchDownload('bookmarked');
+            });
+            logger.info('✅ 已绑定: 收藏列表批量下载按钮');
+        }
+
+        if (bookmarkedStopDownloadBtn) {
+            bookmarkedStopDownloadBtn.addEventListener('click', () => {
+                this.app.handleStopDownload('bookmarked');
+            });
+            logger.info('✅ 已绑定: 收藏列表停止下载按钮');
         }
     }
 
@@ -325,11 +342,28 @@ class EventBinder {
      */
     bindFollowingBatchOperations() {
         const followingBatchSelect = document.getElementById('followingBatchSelect');
+        const followingBatchDownloadBtn = document.querySelector('.batch-download-btn[data-type="following"]');
+        const followingStopDownloadBtn = document.querySelector('#tabContentFollowing .stop-download-btn');
+
         if (followingBatchSelect) {
             followingBatchSelect.addEventListener('change', (event) => {
                 this.app.handleBatchSelectionChange('following', event.target.value);
             });
             logger.info('✅ 已绑定: 关注列表批量选择下拉框');
+        }
+
+        if (followingBatchDownloadBtn) {
+            followingBatchDownloadBtn.addEventListener('click', () => {
+                this.app.handleBatchDownload('following');
+            });
+            logger.info('✅ 已绑定: 关注列表批量下载按钮');
+        }
+
+        if (followingStopDownloadBtn) {
+            followingStopDownloadBtn.addEventListener('click', () => {
+                this.app.handleStopDownload('following');
+            });
+            logger.info('✅ 已绑定: 关注列表停止下载按钮');
         }
     }
 }

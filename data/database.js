@@ -5,6 +5,7 @@
 
 import { CONFIG } from '../config/constants.js';
 import { createLogger } from '../utils/logger.js';
+import { restoreManager } from './restore-manager.js';
 
 const logger = createLogger('Database');
 
@@ -46,6 +47,18 @@ export class Database {
             request.onsuccess = () => {
                 this.db = request.result;
                 logger.info('✅ IndexedDB 初始化成功');
+                
+                // ✅ Sidebar 上下文中跳过恢复（由 Content Script 管理数据）
+                const isSidebar = window.location.href.startsWith('chrome-extension://');
+                if (isSidebar) {
+                    logger.info('ℹ️ Sidebar 上下文，跳过数据库恢复');
+                } else {
+                    // Content Script 上下文中尝试从备份文件恢复
+                    this._restoreFromBackup().catch(error => {
+                        logger.warn('⚠️ 从备份恢复失败，但不影响使用:', error.message);
+                    });
+                }
+                
                 resolve(this.db);
             };
 
@@ -349,6 +362,36 @@ export class Database {
             this.db.close();
             this.db = null;
             logger.info('🔒 数据库连接已关闭');
+        }
+    }
+
+    /**
+     * 从备份文件恢复 completed_works 数据
+     * @private
+     */
+    async _restoreFromBackup() {
+        try {
+            // 1. 检查 completed_works 表是否为空
+            const existingRecords = await this.getAll('completed_works');
+            
+            if (existingRecords && existingRecords.length > 0) {
+                logger.info(`ℹ️ completed_works 已有 ${existingRecords.length} 条记录，跳过恢复`);
+                return;
+            }
+            
+            logger.info('🔄 completed_works 为空，尝试从备份文件恢复...');
+            
+            // 2. 调用 restoreManager 恢复数据
+            const result = await restoreManager.restoreFromBackup('completed_works');
+            
+            if (result.success) {
+                logger.info(`✅ 从备份恢复成功: ${result.totalRestored} 条记录`);
+            } else {
+                logger.info(`ℹ️ 未找到备份文件或恢复失败: ${result.reason || '未知原因'}`);
+            }
+        } catch (error) {
+            logger.error('❌ 从备份恢复 completed_works 失败:', error);
+            throw error;
         }
     }
 

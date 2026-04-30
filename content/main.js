@@ -9,6 +9,9 @@ import { dataFetcher } from './services/data-fetcher.js';
 import { SingleDownloader } from '../download/single-downloader.js';
 import { backupManager } from '../data/backup-manager.js';
 import { database } from '../data/database.js';
+import { platformAPI } from '../api/platform-adapter.js';
+import { CONFIG } from '../config/constants.js';
+import fileLogger from '../utils/file-logger.js';
 
 const logger = createLogger('ContentScript');
 
@@ -16,6 +19,10 @@ class ContentScript {
     constructor() {
         this.isCollapsed = false;
         this.injected = false;
+        
+        // ✅ 批量下载状态管理
+        this.currentBatchManager = null;  // 当前批量下载管理器实例
+        this.currentBatchId = null;       // 当前批次ID
         
         // 从 URL 参数获取 sidebar URL
         const currentScript = document.getElementById('favgallery-script-tag');
@@ -206,16 +213,36 @@ class ContentScript {
                 this.loadLikedWorksFromCache(iframe);  // ✅ 改为 loadLikedWorksFromCache
                 break;
             
-            // ✅ P0: 处理单个作品下载请求
-            case 'DOWNLOAD_WORK':
-                logger.info(`📥 收到下载作品请求: ${event.data.work.workId}`);
-                this.handleDownloadWork(event.data, iframe);
+            // ✅ P0: 处理单个作品下载请求（只传 workId）
+            case 'DOWNLOAD_WORK_BY_ID':
+                logger.info(`📥 收到下载作品请求: ${event.data.workId}`);
+                this.handleDownloadWorkById(event.data, iframe);
                 break;
             
-            // ✅ 处理备份请求
-            case 'BACKUP_REQUEST':
-                logger.info('🔄 收到备份请求');
-                this.handleBackupRequest(event);
+            // ✅ 处理批量下载请求
+            case 'BATCH_DOWNLOAD_WORKS':
+                logger.info(`📥 收到批量下载请求: ${event.data.workIds.length} 个作品`);
+                this.handleBatchDownloadWorks(event.data, iframe);
+                break;
+            
+            // ✅ 处理停止批量下载请求
+            case 'STOP_BATCH_DOWNLOAD':
+                logger.info(`⏹️ 收到停止批量下载请求: ${event.data.batchId}`);
+                this.handleStopBatchDownload(event.data, iframe);
+                break;
+            
+            // ✅ 处理数据库查询请求
+            case 'GET_DOWNLOADED_WORK_IDS':
+                logger.info('📊 收到查询已下载作品 ID 请求');
+                this.handleGetDownloadedWorkIds(event, iframe);
+                break;
+            
+            // ✅ 处理 Sidebar 日志批量发送
+            case 'SIDEBAR_LOG_BATCH':
+                const logs = event.data.data; // 数组 [{level, module, message, timestamp}, ...]
+                logs.forEach(log => {
+                    fileLogger.writeToFile(log.level, log.module, log.message);
+                });
                 break;
                 
             default:
@@ -262,10 +289,10 @@ class ContentScript {
     }
     
     /**
-     * ✅ P0: 处理单个作品下载（在 Content Script 中执行）
+     * ✅ P0: 处理单个作品下载（在 Content Script 中执行，只传 workId）
      */
-    async handleDownloadWork(data, iframe) {
-        const { work, folderPath } = data;
+    async handleDownloadWorkById(data, iframe) {
+        const { workId, folderPath } = data;
         
         // ✅ P1: 设置 5 分钟超时
         let timeoutId = null;
@@ -276,14 +303,24 @@ class ContentScript {
         });
         
         try {
-            logger.info(`📥 开始下载作品: ${work.workId}`);
+            logger.info(`📥 开始下载作品: ${workId}`);
+            
+            // ✅ 实时获取作品详情（包括最新下载链接）
+            logger.info(`🔄 正在获取作品详情: ${workId}`);
+            const workDetail = await platformAPI.getWorkDetail(workId);
+            
+            if (!workDetail) {
+                throw new Error('获取作品详情失败');
+            }
+            
+            logger.info(`✅ 已获取作品详情: ${workDetail.workId}`);
             
             // ✅ 创建 SingleDownloader 实例（使用 Content Script 的 fileSystem）
             const downloader = new SingleDownloader(fileSystem);
             
             // ✅ 执行下载（带超时）
             const result = await Promise.race([
-                downloader.download(work, folderPath),
+                downloader.download(workDetail, folderPath),
                 timeoutPromise
             ]);
             
@@ -294,20 +331,72 @@ class ContentScript {
             
             // ✅ 通知 Sidebar 下载结果
             if (result.success) {
-                logger.info(`✅ 下载成功: ${work.workId}`);
+                logger.info(`✅ 下载成功: ${workId}`);
                 
+                // ✅ 立即通知 Sidebar，不等待保存和备份
                 iframe.contentWindow.postMessage({
                     source: 'content',
                     type: 'DOWNLOAD_SUCCESS',
-                    workId: work.workId,
+                    workId: workId,
                     result: result
                 }, '*');
+                
+                // ✅ 异步保存到数据库并备份（不阻塞 UI）
+                const mediaType = workDetail.isImagePost ? 'image_post' : 'video';
+                
+                // ✅ 生成文件路径（使用 SingleDownloader 的路径生成逻辑）
+                const platform = CONFIG.ACTIVE_PLATFORM;
+                const platformName = CONFIG.PLATFORM_INFO[platform]?.name || platform;
+                const author = workDetail.author;
+                let authorFolder = '未知作者';
+                if (author) {
+                    const nickname = author.nickname || '未知用户';
+                    const uid = author.uid || author.platformId || 'unknown';
+                    const safeNickname = nickname.replace(/[<>:"/\\|?*]/g, '_');
+                    authorFolder = `${safeNickname}(${uid})`;
+                }
+                
+                const config = CONFIG.DOWNLOAD_CONFIG.fileSystem;
+                const mediaFolder = mediaType === 'video' ? config.mediaTypeFolders.video : config.mediaTypeFolders.imagePost;
+                const fileNameFormat = mediaType === 'video' ? config.fileNameFormats.video : config.fileNameFormats.image;
+                
+                let fileName;
+                if (mediaType === 'video') {
+                    fileName = fileNameFormat.replace('{workId}', workId);
+                } else {
+                    fileName = fileNameFormat.replace('{workId}', workId).replace('{index}', '01');
+                }
+                
+                const filePath = `${platformName}/${authorFolder}/${mediaFolder}/${fileName}`;
+                
+                const record = {
+                    workId: workId,
+                    downloadTime: Date.now(),
+                    filePath,
+                    fileSize: result.fileSize || 0,
+                    mediaType,
+                    quality: 'origin'
+                };
+                
+                // 使用 setTimeout 将保存操作放到下一个事件循环
+                setTimeout(async () => {
+                    try {
+                        await database.markAsDownloaded(record);  // ✅ 统一使用 markAsDownloaded()
+                        logger.info(`💾 已记录到数据库: ${workId}`);
+                        
+                        // ✅ 触发备份
+                        await backupManager.performSelectiveBackup(['completed_works']);
+                        logger.info('✅ 下载状态已备份到文件系统');
+                    } catch (error) {
+                        logger.error(`❌ 保存或备份失败: ${workId}`, error);
+                    }
+                }, 0);
             } else {
-                logger.error(`❌ 下载失败: ${work.workId}`, result.error);
+                logger.error(`❌ 下载失败: ${workId}`, result.error);
                 iframe.contentWindow.postMessage({
                     source: 'content',
                     type: 'DOWNLOAD_FAILED',
-                    workId: work.workId,
+                    workId: workId,
                     error: result.error
                 }, '*');
             }
@@ -317,36 +406,191 @@ class ContentScript {
                 clearTimeout(timeoutId);
             }
             
-            logger.error(`❌ 下载异常: ${work.workId}`, error);
+            logger.error(`❌ 下载异常: ${workId}`, error);
             iframe.contentWindow.postMessage({
                 source: 'content',
                 type: 'DOWNLOAD_FAILED',
-                workId: work.workId,
+                workId: workId,
                 error: error.message || '未知错误'
             }, '*');
         }
     }
 
     /**
-     * ✅ 处理备份请求
+     * ✅ 处理查询已下载作品 ID 请求
      */
-    async handleBackupRequest(event) {
+    async handleGetDownloadedWorkIds(event, iframe) {
+        const { messageId } = event.data;
+        
         try {
-            logger.info('🔄 正在备份下载状态到文件系统...');
+            logger.info('📊 开始查询已下载作品 ID...');
             
-            // ✅ 如果有新记录，先保存到 Content Script 的数据库
-            const newRecord = event.data?.data?.newRecord;
-            if (newRecord) {
-                logger.info('💾 收到新记录，保存到 Content Script 数据库...');
-                await database.save('completed_works', newRecord);
-                logger.info('✅ 新记录已保存');
+            // 查询 Content Script 的数据库
+            const ids = await database.getDownloadedWorkIds();
+            
+            logger.info(`✅ 查询成功: ${ids.length} 个已下载作品`);
+            
+            // 发送响应
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'DB_RESPONSE_GET_DOWNLOADED_WORK_IDS',
+                messageId,
+                success: true,
+                data: ids
+            }, '*');
+        } catch (error) {
+            logger.error('❌ 查询已下载作品 ID 失败:', error);
+            
+            // 发送错误响应
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'DB_RESPONSE_GET_DOWNLOADED_WORK_IDS',
+                messageId,
+                success: false,
+                error: error.message || '未知错误'
+            }, '*');
+        }
+    }
+
+    /**
+     * ✅ 处理批量下载请求
+     */
+    async handleBatchDownloadWorks(data, iframe) {
+        const { workIds, folderPath, batchId } = data;
+        
+        try {
+            logger.info(`🚀 开始批量下载: ${workIds.length} 个作品, batchId: ${batchId}`);
+            
+            // ✅ 检查前置条件
+            if (!fileSystem.rootDirectoryHandle) {
+                throw new Error('未设置根目录句柄，请先选择文件夹');
             }
             
-            // ✅ 使用选择性备份，只备份 completed_works 表
-            await backupManager.performSelectiveBackup(['completed_works']);
-            logger.info('✅ 下载状态已备份到文件系统');
-        } catch (backupError) {
-            logger.warn('⚠️ 备份失败:', backupError.message);
+            if (workIds.length === 0) {
+                throw new Error('作品列表为空');
+            }
+            
+            // ✅ 动态导入 BatchDownloadManager
+            const { BatchDownloadManager } = await import('../download/batch-download-manager.js');
+            
+            // ✅ 创建 BatchDownloadManager 实例（使用 Content Script 的 fileSystem）
+            const batchManager = new BatchDownloadManager(fileSystem);
+            
+            // ✅ 保存实例引用，以便支持停止功能
+            this.currentBatchManager = batchManager;
+            this.currentBatchId = batchId;
+            
+            // ✅ 执行批量下载
+            const result = await batchManager.startWithIds(
+                batchId,
+                workIds,
+                folderPath,
+                (progress, lastResult) => {
+                    // ✅ 检查是否是 ITEM_START 事件
+                    if (lastResult && lastResult.type === 'ITEM_START') {
+                        // 发送开始下载消息
+                        iframe.contentWindow.postMessage({
+                            source: 'content',
+                            type: 'BATCH_DOWNLOAD_ITEM_START',  // ✅ 新增消息类型
+                            batchId: batchId,
+                            workId: lastResult.workId
+                        }, '*');
+                        return;  // ✅ 不发送进度消息
+                    }
+                    
+                    // ✅ 处理 UI_LOG 消息
+                    if (lastResult && lastResult.type === 'UI_LOG') {
+                        iframe.contentWindow.postMessage({
+                            source: 'content',
+                            type: 'UI_LOG',
+                            level: lastResult.level,
+                            message: lastResult.message
+                        }, '*');
+                        return;  // ✅ 不发送进度消息
+                    }
+                    
+                    // ✅ 发送进度消息到 Sidebar
+                    iframe.contentWindow.postMessage({
+                        source: 'content',
+                        type: 'BATCH_DOWNLOAD_PROGRESS',
+                        batchId: batchId,
+                        progress: progress
+                    }, '*');
+                    
+                    // ✅ 发送单个作品的下载结果（用于更新 UI）
+                    if (lastResult) {
+                        if (lastResult.success) {
+                            iframe.contentWindow.postMessage({
+                                source: 'content',
+                                type: 'DOWNLOAD_SUCCESS',
+                                workId: lastResult.workId,
+                                result: lastResult
+                            }, '*');
+                        } else {
+                            iframe.contentWindow.postMessage({
+                                source: 'content',
+                                type: 'DOWNLOAD_FAILED',
+                                workId: lastResult.workId,
+                                error: lastResult.error
+                            }, '*');
+                        }
+                    }
+                }
+            );
+            
+            // ✅ 发送完成消息
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'BATCH_DOWNLOAD_COMPLETE',
+                batchId: batchId,
+                result: result
+            }, '*');
+            
+            logger.info(`✅ 批量下载完成: 成功 ${result.progress.success}, 失败 ${result.progress.failed}`);
+            
+            // ✅ 清理引用
+            this.currentBatchManager = null;
+            this.currentBatchId = null;
+            
+        } catch (error) {
+            logger.error('❌ 批量下载异常:', error);
+            
+            // ✅ 发送错误消息
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'BATCH_DOWNLOAD_ERROR',
+                batchId: batchId,
+                error: error.message || '未知错误'
+            }, '*');
+            
+            // ✅ 清理引用
+            this.currentBatchManager = null;
+            this.currentBatchId = null;
+        }
+    }
+
+    /**
+     * ✅ 处理停止批量下载请求
+     */
+    handleStopBatchDownload(data, iframe) {
+        const { batchId } = data;
+        
+        try {
+            logger.info(`⏹️ 停止批量下载: ${batchId}`);
+            
+            // ✅ 检查是否有正在运行的批量下载
+            if (!this.currentBatchManager || this.currentBatchId !== batchId) {
+                logger.warn('⚠️ 没有匹配的批量下载任务');
+                return;
+            }
+            
+            // ✅ 调用 stop 方法
+            this.currentBatchManager.stop();
+            
+            logger.info('✅ 停止请求已发送');
+            
+        } catch (error) {
+            logger.error('❌ 停止批量下载失败:', error);
         }
     }
 

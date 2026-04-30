@@ -220,4 +220,20 @@ export function mergeWorkData(cachedWorks, apiWorks, metadata, metadataField, ap
     return { mergedData, newCount, updatedMetadata };
 }
 
+/**
+ * 清理字符串中的非法文件名字符（Windows 兼容）
+ * Windows 不允许的字符: < > : " / \ | ? *
+ * 
+ * @param {string} str - 原始字符串
+ * @returns {string} 安全的字符串，非字符串类型原样返回
+ */
+export function sanitizeForFileSystem(str) {
+    if (typeof str !== 'string') return str;
+    
+    return str
+        .replace(/[<>:"/\\|?*]/g, '_')  // 替换非法字符为下划线
+        .trim()                           // 去除首尾空格
+        .replace(/\.+$/g, '');            // 移除末尾的点（Windows 不允许）
+}
+
 

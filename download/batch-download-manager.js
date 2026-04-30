@@ -49,63 +49,120 @@ export class BatchDownloadManager {
     }
 
     /**
-     * 开始批量下载
+     * ✅ 开始批量下载（通过 workIds）
      * @param {string} batchId - 批次ID
-     * @param {Array} works - 作品列表
+     * @param {Array} workIds - 作品ID列表
      * @param {string} folderPath - 保存路径
      * @param {Function} onProgress - 进度回调
      * @returns {Promise<Object>} 下载结果
      */
-    async start(batchId, works, folderPath, onProgress = null) {
+    async startWithIds(batchId, workIds, folderPath, onProgress = null) {
         try {
+            // ✅ 保存 onProgress 回调供 randomDelay 使用
+            this._onProgress = onProgress;
+            
+            // ✅ 导入 platformAPI
+            const { platformAPI } = await import('../api/platform-adapter.js');
+            
             // 初始化批次
             this.batchId = batchId;
             this.status = 'running';
             this.shouldStop = false;
             this.progress = {
-                total: works.length,
+                total: workIds.length,
                 current: 0,
                 success: 0,
                 failed: 0
             };
 
-            logger.info(`🚀 开始批量下载: ${works.length} 个作品`);
+            logger.info(`🚀 开始批量下载: ${workIds.length} 个作品`);
 
             const results = [];
 
             // 串行下载
-            for (let i = 0; i < works.length; i++) {
+            for (let i = 0; i < workIds.length; i++) {
                 // 检查是否应该停止
                 if (this.shouldStop) {
-                    logger.info(`⏹️ 用户停止下载，已完成 ${i}/${works.length} 个`);
+                    logger.info(`⏹️ 用户停止下载，已完成 ${i}/${workIds.length} 个`);
                     break;
                 }
 
-                const work = works[i];
+                const workId = workIds[i];
                 this.progress.current = i + 1;
 
-                logger.info(`📥 [${i + 1}/${works.length}] 下载: ${work.workId}`);
+                logger.info(`📥 [${i + 1}/${workIds.length}] 下载: ${workId}`);
+
+                // ✅ 实时获取作品详情
+                logger.info(`🔄 正在获取作品详情: ${workId}`);
+                let workDetail;
+                try {
+                    workDetail = await platformAPI.getWorkDetail(workId);
+                    
+                    if (!workDetail) {
+                        throw new Error('获取作品详情失败');
+                    }
+                    
+                    logger.info(`✅ 已获取作品详情: ${workDetail.workId}`);
+                } catch (error) {
+                    logger.error(`❌ 获取作品详情失败: ${workId}`, error);
+                    const failedResult = {
+                        success: false,
+                        workId: workId,
+                        error: `获取作品详情失败: ${error.message}`
+                    };
+                    results.push(failedResult);
+                    this.progress.failed++;
+                    
+                    // 通知进度
+                    if (onProgress) {
+                        onProgress({ ...this.progress, results }, failedResult);  // ✅ 传递失败结果
+                    }
+                    continue;
+                }
+
+                // ✅ 通知 Sidebar：开始下载这个作品
+                if (onProgress) {
+                    onProgress({ ...this.progress, results }, { 
+                        type: 'ITEM_START',  // ✅ 新增类型标识
+                        workId: workId 
+                    });
+                }
 
                 // 下载作品（带重试）
-                const result = await this.downloadWithRetry(work, folderPath);
+                const result = await this.downloadWithRetry(workDetail, folderPath);
                 results.push(result);
 
                 if (result.success) {
                     this.progress.success++;
                     
-                    // ✅ 追踪已下载的作品（传递完整结果）
-                    this.trackDownloadedWork(work, result, folderPath);
+                    // ✅ 方案 B：立即保存到数据库
+                    const mediaType = workDetail.isImagePost ? 'image_post' : 'video';
+                    const filePath = this.generateRelativeFilePath(workDetail, mediaType);
+                    
+                    await database.markAsDownloaded({
+                        workId: workDetail.workId,
+                        downloadTime: Date.now(),
+                        filePath,
+                        fileSize: result.fileSize || 0,
+                        mediaType,
+                        quality: 'origin'
+                    });
+                    
+                    logger.info(`💾 已记录到数据库: ${workDetail.workId}`);
+                    
+                    // ✅ 追踪已下载的作品（用于备份）
+                    this.trackDownloadedWork(workDetail, result, folderPath);
                 } else {
                     this.progress.failed++;
                 }
 
                 // 通知进度
                 if (onProgress) {
-                    onProgress({ ...this.progress, results });
+                    onProgress({ ...this.progress, results }, result);  // ✅ 传递最后一个结果
                 }
 
                 // 如果不是最后一个，添加随机延迟
-                if (i < works.length - 1 && !this.shouldStop) {
+                if (i < workIds.length - 1 && !this.shouldStop) {
                     await this.randomDelay();
                 }
             }
@@ -119,7 +176,8 @@ export class BatchDownloadManager {
                 batchId: this.batchId,
                 status: this.status,
                 progress: this.progress,
-                results
+                results,
+                stopped: this.shouldStop  // ✅ 添加停止标志
             };
         } catch (error) {
             logger.error(`❌ 批量下载异常`, error);
@@ -142,6 +200,14 @@ export class BatchDownloadManager {
     end() {
         this.status = 'ended';
         logger.info(`🏁 批次结束: ${this.batchId}`);
+    }
+
+    /**
+     * ✅ 检查是否被停止
+     * @returns {boolean} 是否被停止
+     */
+    isStopped() {
+        return this.shouldStop;
     }
 
     /**
@@ -190,7 +256,17 @@ export class BatchDownloadManager {
             Math.random() * (this.config.maxDelay - this.config.minDelay) + this.config.minDelay
         );
 
-        logger.info(`⏱️ 防止封号，等待 ${(delayTime / 1000).toFixed(1)} 秒...`);
+        const delaySeconds = (delayTime / 1000).toFixed(1);
+        logger.info(`⏱️ 防止封号，等待 ${delaySeconds} 秒...`);
+        
+        // ✅ 通过 onProgress 回调发送 UI 日志消息
+        if (this._onProgress) {
+            this._onProgress({ ...this.progress }, { 
+                type: 'UI_LOG',
+                level: 'info',
+                message: `⏱️ 防封号延迟: ${delaySeconds} 秒...`
+            });
+        }
 
         // 可中断的延迟
         await new Promise((resolve) => {
@@ -256,38 +332,7 @@ export class BatchDownloadManager {
      */
     async triggerDownloadBackup() {
         try {
-            const downloadedWorks = [];
-            
-            // 遍历所有已下载的作品，生成完整记录
-            for (const { work, folderPath } of this.downloadBackupTracker.downloadedWorks) {
-                // 生成文件路径和类型
-                const mediaType = work.isImagePost ? 'image_post' : 'video';
-                const filePath = this.generateRelativeFilePath(work, folderPath, mediaType);
-                
-                // 获取实际文件大小
-                let fileSize = 0;
-                try {
-                    const fileHandle = await this.fileSystem._getFileHandle(filePath, false);
-                    const file = await fileHandle.getFile();
-                    fileSize = file.size;
-                } catch (error) {
-                    logger.warn(`⚠️ 获取文件大小失败: ${filePath}`, error.message);
-                }
-                
-                downloadedWorks.push({
-                    workId: work.workId,
-                    downloadTime: Date.now(),
-                    filePath,
-                    fileSize,
-                    mediaType,
-                    quality: 'origin'  // 默认最高画质
-                });
-            }
-            
-            // 批量保存到 completed_works 表
-            await database.markAsDownloaded(downloadedWorks);
-            
-            logger.info(`✅ 下载进度已记录: ${downloadedWorks.length} 个作品`);
+            // ✅ 方案 B：已改为每次下载成功后立即保存，这里只负责备份到文件系统
             
             // ✅ 触发立即备份到本地文件（如果启用）
             const immediateBackupConfig = CONFIG.BACKUP_CONFIG.downloadBackup?.immediateBackup;
@@ -316,14 +361,24 @@ export class BatchDownloadManager {
     /**
      * 生成相对文件路径
      * @param {Object} work - 作品对象
-     * @param {string} folderPath - 文件夹路径
      * @param {string} mediaType - 媒体类型
      * @returns {string} 相对路径
      */
-    generateRelativeFilePath(work, folderPath, mediaType) {
-        // 提取相对于根目录的路径
-        // folderPath 格式：抖音/深渊龙宝宝(106606479711)
-        // 需要追加：视频/7xxx.mp4 或 图集/
+    generateRelativeFilePath(work, mediaType) {
+        // ✅ 统一使用 SingleDownloader 的路径生成逻辑
+        const platform = CONFIG.ACTIVE_PLATFORM;
+        const platformName = CONFIG.PLATFORM_INFO[platform]?.name || platform;
+        
+        // 提取作者信息
+        const author = work?.author;
+        let authorFolder = '未知作者';
+        if (author) {
+            const nickname = author.nickname || '未知用户';
+            const uid = author.uid || author.platformId || 'unknown';
+            // 清理昵称中的非法文件名字符
+            const safeNickname = nickname.replace(/[<>:"/\\|?*]/g, '_');
+            authorFolder = `${safeNickname}(${uid})`;
+        }
         
         const config = CONFIG.DOWNLOAD_CONFIG.fileSystem;
         const mediaFolder = mediaType === 'video' ? config.mediaTypeFolders.video : config.mediaTypeFolders.imagePost;
@@ -337,6 +392,7 @@ export class BatchDownloadManager {
             fileName = fileNameFormat.replace('{workId}', work.workId).replace('{index}', '01');
         }
         
-        return `${folderPath}/${mediaFolder}/${fileName}`;
+        // ✅ 完整路径：平台/作者昵称(uid)/视频或图集/workId.xxx
+        return `${platformName}/${authorFolder}/${mediaFolder}/${fileName}`;
     }
 }

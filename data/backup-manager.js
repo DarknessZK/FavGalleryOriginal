@@ -13,9 +13,13 @@ const logger = createLogger('BackupManager');
 class BackupManager {
     constructor() {
         this.isBackingUp = false;
-        this.lastBackupTime = 0;
+        // ❌ 已移除：this.lastBackupTime - 没有实际用途，manifest.json 中已有持久化的 lastBackupTime
         this.backupCount = 0;
         this.backupTimer = null;
+        
+        // ✅ completed_works 备份队列
+        this.completedWorksBackupQueue = [];
+        this.isProcessingQueue = false;
     }
 
     /**
@@ -186,22 +190,6 @@ class BackupManager {
     }
 
     /**
-     * 格式化文件大小（人类可读）
-     * 
-     * @param {number} bytes - 字节数
-     * @returns {string} 格式化后的文件大小
-     */
-    formatFileSize(bytes) {
-        if (bytes === 0) return '0 B';
-        
-        const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    }
-
-    /**
      * 验证备份数据完整性
      * 
      * @param {Object} backupData - 备份数据（包含 metadata 和 data）
@@ -288,15 +276,15 @@ class BackupManager {
             await this._saveManifest(manifest);
 
             const duration = Date.now() - startTime;
-            this.lastBackupTime = Date.now();
+            // ❌ 已移除：this.lastBackupTime = Date.now() - 没有实际用途，manifest.json 中已有持久化的 lastBackupTime
             this.backupCount++;
             
             logger.info(`✅ 全量备份完成 (耗时: ${duration}ms)`);
             
             return {
                 success: true,
-                duration,
-                backupTime: this.lastBackupTime
+                duration
+                // ❌ 已移除：backupTime - 调用者如果需要时间，可以从 manifest.json 读取
             };
             
         } catch (error) {
@@ -363,58 +351,84 @@ class BackupManager {
 
     /**
      * NDJSON 增量备份 completed_works 表
-     * @param {Object} manifest - manifest 对象
-     * @param {boolean} force - 是否强制备份
+     * @param {Object} manifest - manifest 对象（保留参数以兼容调用接口，但不使用）
+     * @param {boolean} force - 是否强制备份（保留参数以兼容调用接口，但不使用）
      */
     async _backupCompletedWorksNDJSON(manifest, force = false) {
         try {
-            // 获取当前数据
-            const currentData = await database.getAll('completed_works');
+            // ✅ 将备份请求加入队列（不需要 manifest）
+            this.completedWorksBackupQueue.push({});
             
-            if (!currentData || currentData.length === 0) {
-                logger.info('ℹ️ completed_works: 无数据，跳过备份');
+            // ✅ 如果正在处理队列，等待当前处理完成
+            if (this.isProcessingQueue) {
+                logger.info('ℹ️ completed_works 备份队列处理中，已加入队列');
                 return;
             }
-
-            // 读取现有的 NDJSON 文件，获取已备份的 workId
-            const platform = CONFIG.ACTIVE_PLATFORM;
-            const filePath = `${CONFIG.FILE_SYSTEM.METADATA_DIR}/${platform}/completed_works.ndjson`;
-            let existingWorkIds = new Set();
             
-            try {
-                const existingRecords = await fileSystem.readNDJSON(filePath);
-                for (const record of existingRecords) {
-                    existingWorkIds.add(record.workId);
-                }
-                logger.info(`📖 已读取 ${existingWorkIds.size} 条已备份记录`);
-            } catch (error) {
-                logger.info('ℹ️ 未找到现有备份文件，将创建新文件');
-            }
-
-            // 找出新增的记录
-            const newRecords = currentData.filter(record => !existingWorkIds.has(record.workId));
-            
-            if (newRecords.length === 0) {
-                logger.info('ℹ️ completed_works: 无新增记录，跳过备份');
-                return;
-            }
-
-            logger.info(`📝 completed_works: 检测到 ${newRecords.length} 条新增记录，执行增量备份`);
-
-            // 使用工具方法追加到文件
-            await fileSystem.appendNDJSON(filePath, newRecords);
-            logger.info(`✅ completed_works 增量备份成功 (${newRecords.length} 条)`);
-
-            // 更新哈希（使用所有记录的哈希）
-            const currentHash = this._calculateHash(currentData);
-            if (!manifest.hashes) {
-                manifest.hashes = {};
-            }
-            manifest.hashes['completed_works'] = currentHash;
+            // ✅ 开始处理队列
+            await this._processCompletedWorksQueue();
         } catch (error) {
             logger.error('❌ 备份 completed_works 失败:', error);
             logger.error('   错误消息:', error?.message || '无消息');
             throw error;
+        }
+    }
+
+    /**
+     * 处理 completed_works 备份队列
+     * @private
+     */
+    async _processCompletedWorksQueue() {
+        if (this.isProcessingQueue || this.completedWorksBackupQueue.length === 0) {
+            return;
+        }
+        
+        this.isProcessingQueue = true;
+        
+        try {
+            while (this.completedWorksBackupQueue.length > 0) {
+                // ✅ 先取出请求，但不立即移除
+                const request = this.completedWorksBackupQueue[0];
+                
+                try {
+                    // 获取当前数据
+                    const currentData = await database.getAll('completed_works');
+                    
+                    if (!currentData || currentData.length === 0) {
+                        logger.info('ℹ️ completed_works: 无数据，跳过备份');
+                        // ✅ 成功后才移除请求
+                        this.completedWorksBackupQueue.shift();
+                        continue;
+                    }
+
+                    // ✅ 直接追加所有记录到 NDJSON 文件（不对比 workId，不计算哈希）
+                    const platform = CONFIG.ACTIVE_PLATFORM;
+                    const filePath = `${CONFIG.FILE_SYSTEM.METADATA_DIR}/${platform}/completed_works.ndjson`;
+                    
+                    logger.info(`📝 completed_works: 执行增量备份 (${currentData.length} 条)`);
+                    
+                    // 使用工具方法追加到文件
+                    await fileSystem.appendNDJSON(filePath, currentData);
+                    logger.info(`✅ completed_works 增量备份成功 (${currentData.length} 条)`);
+                    
+                    // ✅ 成功后才移除请求
+                    this.completedWorksBackupQueue.shift();
+                } catch (error) {
+                    logger.error('❌ 处理队列中的备份请求失败:', error);
+                    logger.error('   错误消息:', error?.message || '无消息');
+                    // ✅ 失败时不移除请求，保留在队列中
+                    // 停止处理后续请求
+                    break;
+                }
+            }
+            
+            if (this.completedWorksBackupQueue.length === 0) {
+                logger.info('✅ completed_works 备份队列处理完成');
+            } else {
+                logger.warn(`⚠️ completed_works 备份队列还有 ${this.completedWorksBackupQueue.length} 个未处理的请求`);
+            }
+        } finally {
+            this.isProcessingQueue = false;
         }
     }
 
@@ -548,10 +562,17 @@ class BackupManager {
             throw new Error('必须指定至少一个表名');
         }
         
-        // ✅ 检查是否正在备份
-        if (this.isBackingUp) {
-            logger.warn('⚠️ 备份正在进行中，跳过本次请求');
-            return { success: false, reason: 'backup_in_progress' };
+        // ✅ completed_works 使用队列机制，不需要检查 isBackingUp
+        // ✅ 其他表仍然需要检查并发控制（如果需要的话）
+        if (tableNames.includes('completed_works')) {
+            // completed_works 会进入队列，不会被跳过
+            logger.info('ℹ️ completed_works 备份请求已加入队列');
+        } else {
+            // 其他表检查是否正在备份
+            if (this.isBackingUp) {
+                logger.info('ℹ️ 备份正在进行中，跳过本次请求');
+                return { success: false, reason: 'backup_in_progress' };
+            }
         }
         
         // 检查根目录
@@ -572,17 +593,28 @@ class BackupManager {
             
             logger.info(`🔄 开始选择性备份 (${tableNames.join(', ')})...`);
             
+            // ✅ 跟踪是否有备份失败
+            let hasFailure = false;
+            
             // 遍历指定的表，调用 _backupTableWithHash
             for (const tableName of tableNames) {
                 try {
                     await this._backupTableWithHash(tableName, manifest, false);
                 } catch (error) {
                     logger.error(`❌ 备份 ${tableName} 失败:`, error);
+                    hasFailure = true;
                     // 继续备份其他表，不中断
                 }
             }
             
+            // ✅ 只有所有表都备份成功，才更新 manifest
+            if (hasFailure) {
+                logger.warn('⚠️ 部分表备份失败，不更新 manifest');
+                return { success: false, reason: 'partial_failure' };
+            }
+            
             // 保存 manifest
+            // ✅ completed_works 不更新 hashes，但更新 lastBackupTime 用于记录备份时间
             manifest.lastBackupTime = Date.now();
             await this._saveManifest(manifest);
             
@@ -597,11 +629,12 @@ class BackupManager {
      * 获取备份状态
      * 
      * @returns {Object} 备份状态信息
+     * @note lastBackupTime 已从返回值中移除，如需获取最后备份时间，请从 manifest.json 读取
      */
     getBackupStatus() {
         return {
             isBackingUp: this.isBackingUp,
-            lastBackupTime: this.lastBackupTime,
+            // ❌ 已移除：lastBackupTime - 没有实际用途，manifest.json 中已有持久化的 lastBackupTime
             backupCount: this.backupCount
         };
     }

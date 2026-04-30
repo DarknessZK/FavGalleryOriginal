@@ -1,7 +1,9 @@
 // ==========================================
 // FavGallery - 日志工具
-// 功能：控制台日志管理（Logger 类 + createLogger 工厂函数）
+// 功能：控制台日志管理 + 文件日志（Logger 类 + createLogger 工厂函数）
 // ==========================================
+
+import fileLogger from './file-logger.js';
 
 /**
  * Logger 类 - 控制台日志
@@ -17,6 +19,7 @@ class Logger {
      */
     info(...args) {
         console.log(`[${this.module}]`, ...args);
+        fileLogger.writeToFile('INFO', this.module, args.join(' '));
     }
 
     /**
@@ -24,6 +27,7 @@ class Logger {
      */
     debug(...args) {
         console.debug(`[${this.module}]`, ...args);
+        fileLogger.writeToFile('DEBUG', this.module, args.join(' '));
     }
 
     /**
@@ -31,6 +35,7 @@ class Logger {
      */
     warn(...args) {
         console.warn(`[${this.module}]`, ...args);
+        fileLogger.writeToFile('WARN', this.module, args.join(' '));
     }
 
     /**
@@ -38,6 +43,7 @@ class Logger {
      */
     error(...args) {
         console.error(`[${this.module}]`, ...args);
+        fileLogger.writeToFile('ERROR', this.module, args.join(' '));
     }
 }
 

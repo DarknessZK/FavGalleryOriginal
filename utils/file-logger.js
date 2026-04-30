@@ -15,12 +15,17 @@ class FileLogger {
         this.logDirHandle = null;
         this.maxLogFiles = 10;
         
-        // 日志队列和定时器
+        // Content Script 日志队列和定时器
         this.logQueue = [];
         this.flushTimer = null;
         this.FLUSH_INTERVAL = 2000; // 每 2 秒刷新一次
         this.isFlushing = false;
         this.initialized = false;
+        
+        // ✅ Sidebar 日志缓冲队列和定时器
+        this.sidebarLogQueue = [];
+        this.sidebarFlushTimer = null;
+        this.SIDEBAR_FLUSH_INTERVAL = 3000; // 每 3 秒刷新一次
     }
 
     /**
@@ -38,8 +43,26 @@ class FileLogger {
         // 启动定时刷新
         this.startPeriodicFlush();
         
+        // ✅ 注册页面卸载监听器（Sidebar 环境）
+        this.registerUnloadListener();
+        
         this.initialized = true;
         console.log('[FileLogger] ✅ 日志系统已初始化');
+    }
+
+    /**
+     * 注册页面卸载监听器（确保 Sidebar 关闭时发送剩余日志）
+     */
+    registerUnloadListener() {
+        // 只在 Sidebar 环境注册（没有 rootDirectoryHandle）
+        if (!this.fileManager || !this.fileManager.rootDirectoryHandle) {
+            window.addEventListener('beforeunload', () => {
+                // 立即刷新剩余日志
+                this.flushSidebarLogs();
+                // 停止定时器
+                this.stopSidebarFlushTimer();
+            });
+        }
     }
 
     /**
@@ -166,6 +189,24 @@ class FileLogger {
      */
     async writeToFile(level, module, message) {
         try {
+            // ✅ 检测是否在 Sidebar 环境
+            const isSidebar = !this.fileManager || !this.fileManager.rootDirectoryHandle;
+            
+            if (isSidebar) {
+                // Sidebar 环境：加入缓冲队列，批量发送给 Content Script
+                this.sidebarLogQueue.push({ level, module, message, timestamp: Date.now() });
+                
+                // 启动定时刷新（如果还没启动）
+                this.startSidebarFlushTimer();
+                
+                // 如果队列太长，立即刷新
+                if (this.sidebarLogQueue.length > 100) {
+                    await this.flushSidebarLogs();
+                }
+                return;
+            }
+            
+            // Content Script 环境：正常写入文件
             if (!this.initialized || !this.fileManager || !this.fileManager.rootDirectoryHandle) {
                 return;
             }
@@ -182,6 +223,46 @@ class FileLogger {
         } catch (error) {
             console.error('[FileLogger] ❌ 加入日志队列失败:', error.message || error);
         }
+    }
+    
+    /**
+     * 启动 Sidebar 日志定时刷新
+     */
+    startSidebarFlushTimer() {
+        if (this.sidebarFlushTimer) return;
+        
+        this.sidebarFlushTimer = setInterval(() => {
+            this.flushSidebarLogs();
+        }, this.SIDEBAR_FLUSH_INTERVAL);
+    }
+    
+    /**
+     * 停止 Sidebar 日志定时刷新
+     */
+    stopSidebarFlushTimer() {
+        if (this.sidebarFlushTimer) {
+            clearInterval(this.sidebarFlushTimer);
+            this.sidebarFlushTimer = null;
+            // 刷新剩余日志
+            this.flushSidebarLogs();
+        }
+    }
+    
+    /**
+     * 刷新 Sidebar 日志队列到 Content Script
+     */
+    async flushSidebarLogs() {
+        if (this.sidebarLogQueue.length === 0) return;
+        
+        const logsToSend = [...this.sidebarLogQueue];
+        this.sidebarLogQueue = [];
+        
+        // 通过 postMessage 批量发送给 Content Script
+        window.parent.postMessage({
+            source: 'sidebar',
+            type: 'SIDEBAR_LOG_BATCH',
+            data: logsToSend
+        }, '*');
     }
 
     /**

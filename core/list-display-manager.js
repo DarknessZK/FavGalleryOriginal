@@ -5,7 +5,7 @@
 // ==========================================
 
 import { createLogger, logToUI } from '../utils/logger.js';
-import { database } from '../data/index.js';
+import { databaseProxy } from '../data/database-proxy.js';
 import { CONFIG } from '../config/constants.js';
 
 const logger = createLogger('ListDisplayManager');
@@ -101,9 +101,9 @@ class ListDisplayManager {
     async getDownloadedWorkIds() {
         try {
             logger.info(`🔍 开始查询 completed_works 表...`);
-            const completedWorks = await database.getAll('completed_works');
-            logger.info(`📦 查询结果: ${completedWorks.length} 条记录`, completedWorks.map(w => w.workId));
-            return new Set(completedWorks.map(w => w.workId));
+            const workIds = await databaseProxy.getDownloadedWorkIds();
+            logger.info(`📦 查询结果: ${workIds.length} 条记录`, workIds.slice(0, 5));
+            return new Set(workIds);
         } catch (error) {
             logger.error('❌ 查询下载状态失败:', error);
             return new Set();

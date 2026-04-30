@@ -417,7 +417,161 @@ database.saveCompletedWork() 标记为已完成
 
 ---
 
-## 8. 总结
+## 8. 跨上下文通信架构
+
+### 8.1 架构概述
+
+FavGallery 采用 **Content Script + Sidebar (iframe)** 的双上下文架构：
+
+- **Content Script**：运行在抖音页面中，拥有文件系统和数据库访问权限
+- **Sidebar**：运行在 iframe 中，负责 UI 展示和用户交互
+
+两个上下文通过 `postMessage` API 进行通信，遵循严格的职责分离原则。
+
+### 8.2 职责划分
+
+| 职责 | Content Script | Sidebar |
+|------|---------------|----------|
+| 文件系统操作 | ✅ | ❌ |
+| 数据库操作 | ✅ | ❌（通过代理） |
+| 下载执行 | ✅ | ❌ |
+| UI 展示 | ❌ | ✅ |
+| 用户交互 | ❌ | ✅ |
+| 数据获取 | ✅ | ❌ |
+
+**核心原则：**
+- Sidebar 只传递意图（如 workId 列表），不传递完整数据
+- Content Script 负责所有业务逻辑和数据获取
+- 通过消息通信协作，保持松耦合
+
+### 8.3 消息协议
+
+#### 8.3.1 Sidebar → Content Script
+
+**1. DOWNLOAD_WORK_BY_ID（单个作品下载）**
+```javascript
+{
+    source: 'sidebar',
+    type: 'DOWNLOAD_WORK_BY_ID',
+    workId: '7xxx',      // 作品 ID
+    folderPath: 'xxx'    // 文件夹路径
+}
+```
+
+**2. BATCH_DOWNLOAD_WORKS（批量下载）**
+```javascript
+{
+    source: 'sidebar',
+    type: 'BATCH_DOWNLOAD_WORKS',
+    workIds: ['id1', 'id2', ...],  // 作品 ID 列表
+    folderPath: 'xxx',              // 文件夹路径
+    batchId: 'batch_xxx'            // 批次 ID
+}
+```
+
+**3. STOP_BATCH_DOWNLOAD（停止批量下载）**
+```javascript
+{
+    source: 'sidebar',
+    type: 'STOP_BATCH_DOWNLOAD',
+    batchId: 'batch_xxx'  // 批次 ID
+}
+```
+
+#### 8.3.2 Content Script → Sidebar
+
+**1. DOWNLOAD_SUCCESS（下载成功）**
+```javascript
+{
+    source: 'content',
+    type: 'DOWNLOAD_SUCCESS',
+    workId: '7xxx',
+    result: { success: true, ... }
+}
+```
+
+**2. DOWNLOAD_FAILED（下载失败）**
+```javascript
+{
+    source: 'content',
+    type: 'DOWNLOAD_FAILED',
+    workId: '7xxx',
+    error: '错误信息'
+}
+```
+
+**3. BATCH_DOWNLOAD_PROGRESS（批量下载进度）**
+```javascript
+{
+    source: 'content',
+    type: 'BATCH_DOWNLOAD_PROGRESS',
+    batchId: 'batch_xxx',
+    progress: {
+        total: 10,
+        current: 5,
+        success: 4,
+        failed: 1
+    }
+}
+```
+
+**4. BATCH_DOWNLOAD_COMPLETE（批量下载完成）**
+```javascript
+{
+    source: 'content',
+    type: 'BATCH_DOWNLOAD_COMPLETE',
+    batchId: 'batch_xxx',
+    result: {
+        progress: {...},
+        results: [...],
+        stopped: false  // ✅ 是否被停止
+    }
+}
+```
+
+**5. BATCH_DOWNLOAD_ERROR（批量下载错误）**
+```javascript
+{
+    source: 'content',
+    type: 'BATCH_DOWNLOAD_ERROR',
+    batchId: 'batch_xxx',
+    error: '错误信息'
+}
+```
+
+### 8.4 设计决策
+
+#### 8.4.1 为什么只传 workId 而不是完整数据？
+
+**原因：**
+1. **实时性**：每次下载前都需要调用 `getWorkDetail()` 获取最新链接
+2. **职责清晰**：Sidebar 只负责 UI，不应该关心数据结构
+3. **数据一致性**：Content Script 总是使用最新的数据
+4. **简化通信**：减少跨上下文数据传输量
+
+#### 8.4.2 如何区分正常完成和被停止？
+
+在 `BATCH_DOWNLOAD_COMPLETE` 消息中添加 `stopped` 标志：
+- `stopped === true` → 用户主动停止
+- `stopped === false` → 正常完成
+
+Sidebar 根据此标志显示不同的 UI 反馈：
+- 被停止："⏹️ 已停止（已完成 X/Y）"
+- 正常完成："✅ 完成：成功 X, 失败 Y"
+
+#### 8.4.3 并发控制
+
+**Sidebar 端：**
+- `isDownloading` 标志防止同时启动多个下载任务
+- `currentBatchId` 追踪当前批次
+
+**Content Script 端：**
+- `shouldStop` 标志支持中途停止
+- `currentBatchManager` 引用支持停止操作
+
+---
+
+## 9. 总结
 
 FavGallery 采用**分层架构**设计，职责清晰，易于维护和扩展：
 
@@ -431,6 +585,7 @@ FavGallery 采用**分层架构**设计，职责清晰，易于维护和扩展�
 - 🎯 增量备份（高效可靠）
 - 🎯 季度分片（性能优化）
 - 🎯 模块化设计（易于维护）
+- 🎯 职责分离（Content Script + Sidebar）
 
 
 
