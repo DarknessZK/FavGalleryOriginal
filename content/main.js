@@ -4,11 +4,11 @@
 // ==========================================
 
 import { createLogger } from '../utils/logger.js';
-import { fileSystem } from '../data/file-system.js';
+import { fileSystem } from '../data/storage/file-system.js';
 import { dataFetcher } from './services/data-fetcher.js';
 import { SingleDownloader } from '../download/single-downloader.js';
-import { backupManager } from '../data/backup-manager.js';
-import { database } from '../data/database.js';
+import { backupManager } from '../data/backup/backup-manager.js';
+import { database } from '../data/database/database.js';
 import { platformAPI } from '../api/platform-adapter.js';
 import { CONFIG } from '../config/constants.js';
 import fileLogger from '../utils/file-logger.js';
@@ -23,6 +23,9 @@ class ContentScript {
         // ✅ 批量下载状态管理
         this.currentBatchManager = null;  // 当前批量下载管理器实例
         this.currentBatchId = null;       // 当前批次ID
+        
+        // ✅ 文件夹选择状态管理（防止重复调用）
+        this.isSelectingFolder = false;
         
         // 从 URL 参数获取 sidebar URL
         const currentScript = document.getElementById('favgallery-script-tag');
@@ -47,9 +50,8 @@ class ContentScript {
         
         logger.info('开始注入侧边栏...');
         
-        // 判断当前是否为主页
-        const currentUrl = window.location.href;
-        const isHomePage = currentUrl.includes('/jingxuan') || currentUrl.includes('/recommend');
+        // ✅ 通过 platformAPI 判断当前是否为主页（跨平台架构）
+        const isHomePage = platformAPI.isHomePage();
         this.isCollapsed = !isHomePage;
         
         if (this.isCollapsed) {
@@ -62,58 +64,52 @@ class ContentScript {
         const container = document.createElement('aside');
         container.id = 'favgallery-sidebar';
         
-        const initialWidth = this.isCollapsed ? '0px' : '420px';
-        container.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: ${initialWidth};
-            height: 100vh;
-            z-index: 999999;
-            transition: all 0.3s ease;
-        `;
+        const sidebarConfig = CONFIG.UI_CONFIG.SIDEBAR;
+        const initialWidth = this.isCollapsed ? `${sidebarConfig.COLLAPSED_WIDTH}px` : `${sidebarConfig.WIDTH}px`;
+        
+        // ✅ 使用配置的样式
+        const containerStyles = {
+            ...sidebarConfig.CONTAINER_STYLES,
+            width: initialWidth,
+            zIndex: sidebarConfig.Z_INDEX,
+            transition: `all ${sidebarConfig.TRANSITION_DURATION}s ease`
+        };
+        container.style.cssText = Object.entries(containerStyles)
+            .map(([key, value]) => `${key.replace(/[A-Z]/g, m => '-' + m.toLowerCase())}: ${value}`)
+            .join('; ');
         
         // 创建 iframe
         const iframe = document.createElement('iframe');
         iframe.src = this.sidebarUrl;
-        iframe.style.cssText = `
-            width: ${initialWidth};
-            height: 100vh;
-            border: none;
-            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
-            transition: all 0.3s ease;
-        `;
+        
+        const iframeStyles = {
+            ...sidebarConfig.IFRAME_STYLES,
+            width: initialWidth
+        };
+        iframe.style.cssText = Object.entries(iframeStyles)
+            .map(([key, value]) => `${key.replace(/[A-Z]/g, m => '-' + m.toLowerCase())}: ${value}`)
+            .join('; ');
         
         // 创建切换按钮
         const toggleBtn = document.createElement('button');
         toggleBtn.id = 'sidebar-toggle-btn';
         
-        const btnLeft = this.isCollapsed ? '0px' : '420px';
+        const btnLeft = this.isCollapsed ? `${sidebarConfig.COLLAPSED_WIDTH}px` : `${sidebarConfig.WIDTH}px`;
         const btnIcon = this.isCollapsed ? '▶' : '◀';
         const btnTitle = this.isCollapsed ? '展开侧边栏' : '收起侧边栏';
         
         toggleBtn.innerHTML = btnIcon;
-        toggleBtn.style.cssText = `
-            position: fixed;
-            left: ${btnLeft};
-            top: 50%;
-            transform: translateY(-50%);
-            width: 24px;
-            height: 48px;
-            background: #fff;
-            border: 1px solid #e8e8e8;
-            border-left: none;
-            border-radius: 0 4px 4px 0;
-            cursor: pointer;
-            font-size: 12px;
-            color: #666;
-            box-shadow: 2px 0 4px rgba(0,0,0,0.1);
-            z-index: 1000000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.3s;
-        `;
+        
+        // ✅ 使用配置的样式
+        const toggleBtnStyles = {
+            ...sidebarConfig.TOGGLE_BUTTON_STYLES,
+            left: btnLeft,
+            zIndex: sidebarConfig.TOGGLE_BTN_Z_INDEX,
+            transition: `all ${sidebarConfig.TRANSITION_DURATION}s`
+        };
+        toggleBtn.style.cssText = Object.entries(toggleBtnStyles)
+            .map(([key, value]) => `${key.replace(/[A-Z]/g, m => '-' + m.toLowerCase())}: ${value}`)
+            .join('; ');
         toggleBtn.title = btnTitle;
         
         // 添加到页面
@@ -130,7 +126,7 @@ class ContentScript {
         const root = document.querySelector('#root');
         if (root) {
             root.style.marginLeft = initialWidth;
-            root.style.transition = 'margin-left 0.3s';
+            root.style.transition = `margin-left ${sidebarConfig.TRANSITION_DURATION}s`;
         }
         
         this.injected = true;
@@ -149,9 +145,9 @@ class ContentScript {
         iframe.addEventListener('load', () => {
             logger.info('Iframe 加载完成，准备发送用户信息...');
             
-            setTimeout(() => {
-                this.sendUserInfo(iframe);
-            }, 500);
+            setTimeout(async () => {
+                await this.sendUserInfo(iframe);
+            }, sidebarConfig.IFRAME_LOAD_DELAY);
         });
     }
 
@@ -164,22 +160,26 @@ class ContentScript {
         if (!container || !toggleBtn || !root) return;
 
         this.isCollapsed = !this.isCollapsed;
+        
+        const sidebarConfig = CONFIG.UI_CONFIG.SIDEBAR;
+        const expandedWidth = `${sidebarConfig.WIDTH}px`;
+        const collapsedWidth = `${sidebarConfig.COLLAPSED_WIDTH}px`;
 
         if (this.isCollapsed) {
-            iframe.style.width = '0px';
-            container.style.width = '0px';
-            toggleBtn.style.left = '0px';
+            iframe.style.width = collapsedWidth;
+            container.style.width = collapsedWidth;
+            toggleBtn.style.left = collapsedWidth;
             toggleBtn.innerHTML = '▶';
             toggleBtn.title = '展开侧边栏';
-            root.style.marginLeft = '0px';
+            root.style.marginLeft = collapsedWidth;
             logger.info('✅ 侧边栏已收起');
         } else {
-            iframe.style.width = '420px';
-            container.style.width = '420px';
-            toggleBtn.style.left = '420px';
+            iframe.style.width = expandedWidth;
+            container.style.width = expandedWidth;
+            toggleBtn.style.left = expandedWidth;
             toggleBtn.innerHTML = '◀';
             toggleBtn.title = '收起侧边栏';
-            root.style.marginLeft = '420px';
+            root.style.marginLeft = expandedWidth;
             logger.info('✅ 侧边栏已展开');
         }
     }
@@ -187,7 +187,7 @@ class ContentScript {
     /**
      * 处理来自侧边栏的消息
      */
-    handleMessage(event, iframe) {
+    async handleMessage(event, iframe) {
         if (!event.data || event.data.source !== 'sidebar') return;
         
         logger.info('[Main] 📨 收到消息:', event.data.type);
@@ -195,7 +195,7 @@ class ContentScript {
         switch (event.data.type) {
             case 'GET_USER_INFO':
                 logger.info('收到获取用户信息请求');
-                this.sendUserInfo(iframe);
+                await this.sendUserInfo(iframe);
                 break;
                 
             case 'SELECT_FOLDER':
@@ -205,12 +205,12 @@ class ContentScript {
                 
             case 'LOAD_LIKED_WORKS':  // ✅ 改为 LOAD_LIKED_WORKS
                 logger.info('收到加载点赞列表请求');
-                this.loadLikedWorks(iframe, event.data.maxCount);  // ✅ 改为 loadLikedWorks
+                await this._handleLoadLikedWorks(iframe, event.data.maxCount);
                 break;
                 
             case 'LOAD_LIKED_FROM_CACHE':
                 logger.info('收到从缓存加载点赞列表请求');
-                this.loadLikedWorksFromCache(iframe);  // ✅ 改为 loadLikedWorksFromCache
+                await this._handleLoadLikedFromCache(iframe);
                 break;
             
             // ✅ P0: 处理单个作品下载请求（只传 workId）
@@ -237,6 +237,18 @@ class ContentScript {
                 this.handleGetDownloadedWorkIds(event, iframe);
                 break;
             
+            // ✅ 处理加载收藏夹列表请求
+            case 'LOAD_COLLECTS_LIST':
+                logger.info('📋 收到加载收藏夹列表请求');
+                await this._handleLoadCollectsList(iframe);
+                break;
+            
+            // ✅ 处理加载收藏夹作品请求
+            case 'LOAD_COLLECT_WORKS':
+                logger.info(`🎬 收到加载收藏夹作品请求: ${event.data.collectIds.length} 个收藏夹`);
+                await this._handleLoadCollectWorks(event.data, iframe);
+                break;
+            
             // ✅ 处理 Sidebar 日志批量发送
             case 'SIDEBAR_LOG_BATCH':
                 const logs = event.data.data; // 数组 [{level, module, message, timestamp}, ...]
@@ -251,55 +263,132 @@ class ContentScript {
     }
 
     /**
-     * 加载点赞作品列表
+     * ✅ 处理加载点赞列表
      */
-    async loadLikedWorks(iframe, maxCount) {  // ✅ 改为 loadLikedWorks
+    async _handleLoadLikedWorks(iframe, maxCount) {
+        dataFetcher.setFolderSelected(true);
+        await dataFetcher._loadList('liked', iframe, { maxCount });
+    }
+
+    /**
+     * ✅ 处理从缓存加载点赞列表
+     */
+    async _handleLoadLikedFromCache(iframe) {
+        const cacheResult = await dataFetcher.listConfigs.liked.cacheLoad(fileSystem);
+        iframe.contentWindow.postMessage({
+            source: 'content',
+            type: 'LIKED_WORKS_LOADED',
+            works: cacheResult.works || [],
+            total: (cacheResult.works || []).length
+        }, '*');
+    }
+
+    /**
+     * ✅ 处理加载收藏夹列表
+     */
+    async _handleLoadCollectsList(iframe) {
         try {
-            // 通知 dataFetcher 文件夹已选择
-            dataFetcher.setFolderSelected(true);
+            // ✅ 使用配置的获取数量
+            const maxCount = CONFIG.FETCH_CONFIG.COLLECTS_LIST_MAX_COUNT;
+            const result = await platformAPI.getCollects(0, maxCount);
             
-            // 调用 dataFetcher 加载点赞列表
-            await dataFetcher.loadLikedWorks(iframe, maxCount);  // ✅ 改为 loadLikedWorks
+            if (!result || !result.collects) {
+                throw new Error('获取收藏夹列表失败');
+            }
+            
+            const collects = result.collects;
+            logger.info(`✅ 已加载 ${collects.length} 个收藏夹`);
+            
+            // ✅ 保存到数据库
+            try {
+                const { saveCollects } = await import('../data/storage/collects-manager.js');
+                await saveCollects(fileSystem, collects);
+                logger.info(`💾 已保存 ${collects.length} 个收藏夹到数据库`);
+            } catch (saveError) {
+                logger.warn('⚠️ 保存收藏夹列表失败:', saveError.message);
+            }
+            
+            // 发送响应到 Sidebar
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'COLLECTS_LIST_LOADED',
+                collects: collects,
+                total: result.total || collects.length
+            }, '*');
         } catch (error) {
-            logger.error('❌ 加载点赞列表失败:', error);
+            logger.error('❌ 加载收藏夹列表失败:', error);
             
             iframe.contentWindow.postMessage({
                 source: 'content',
-                type: 'LIKED_WORKS_ERROR',  // ✅ 改为 LIKED_WORKS_ERROR
+                type: 'COLLECTS_LIST_ERROR',
                 error: error.message
             }, '*');
         }
     }
 
     /**
-     * 从缓存加载点赞作品列表
+     * ✅ 处理加载收藏夹作品
      */
-    async loadLikedWorksFromCache(iframe) {  // ✅ 改为 loadLikedWorksFromCache
+    async _handleLoadCollectWorks(data, iframe) {
         try {
-            await dataFetcher.loadLikedWorksFromStorage(iframe);  // ✅ 改为 loadLikedWorksFromStorage
-        } catch (error) {
-            logger.error('❌ 从缓存加载点赞列表失败:', error);
+            const { collectIds } = data;
+            const allWorksMap = new Map();
+            
+            for (let i = 0; i < collectIds.length; i++) {
+                const collectId = collectIds[i];
+                logger.info(`📂 正在加载收藏夹 ${i + 1}/${collectIds.length}: ${collectId}`);
+                
+                try {
+                    const works = await dataFetcher._loadList('bookmarked', iframe, { 
+                        collectId,
+                        maxCount: CONFIG.FETCH_CONFIG.LIST_DEFAULTS.BOOKMARKED
+                    });
+                    
+                    if (works && works.length > 0) {
+                        works.forEach(work => {
+                            allWorksMap.set(work.workId, work);
+                        });
+                        logger.info(`✅ 收藏夹 ${collectId} 加载完成: ${works.length} 个作品，累计 ${allWorksMap.size} 个（去重后）`);
+                    }
+                } catch (error) {
+                    logger.error(`❌ 获取收藏夹 ${collectId} 的作品失败:`, error.message);
+                }
+            }
+            
+            const mergedWorks = Array.from(allWorksMap.values());
+            logger.info(`✅ 总共获取 ${mergedWorks.length} 个作品（去重后）`);
             
             iframe.contentWindow.postMessage({
                 source: 'content',
-                type: 'LIKED_WORKS_ERROR',  // ✅ 改为 LIKED_WORKS_ERROR
+                type: 'COLLECT_WORKS_LOADED',
+                works: mergedWorks,
+                total: mergedWorks.length,
+                collectIds: collectIds
+            }, '*');
+        } catch (error) {
+            logger.error('❌ 加载收藏夹作品失败:', error);
+            
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'COLLECT_WORKS_ERROR',
                 error: error.message
             }, '*');
         }
     }
-    
+
     /**
      * ✅ P0: 处理单个作品下载（在 Content Script 中执行，只传 workId）
      */
     async handleDownloadWorkById(data, iframe) {
         const { workId, folderPath } = data;
         
-        // ✅ P1: 设置 5 分钟超时
+        // ✅ P1: 设置超时（使用配置）
         let timeoutId = null;
+        const timeoutMs = CONFIG.DOWNLOAD_CONFIG.single.contentScriptTimeout;
         const timeoutPromise = new Promise((_, reject) => {
             timeoutId = setTimeout(() => {
-                reject(new Error('下载超时（5分钟）'));
-            }, 300000); // 5 分钟
+                reject(new Error(`下载超时（${timeoutMs / 1000 / 60}分钟）`));
+            }, timeoutMs);
         });
         
         try {
@@ -344,35 +433,10 @@ class ContentScript {
                 // ✅ 异步保存到数据库并备份（不阻塞 UI）
                 const mediaType = workDetail.isImagePost ? 'image_post' : 'video';
                 
-                // ✅ 生成文件路径（使用 SingleDownloader 的路径生成逻辑）
-                const platform = CONFIG.ACTIVE_PLATFORM;
-                const platformName = CONFIG.PLATFORM_INFO[platform]?.name || platform;
-                const author = workDetail.author;
-                let authorFolder = '未知作者';
-                if (author) {
-                    const nickname = author.nickname || '未知用户';
-                    const uid = author.uid || author.platformId || 'unknown';
-                    const safeNickname = nickname.replace(/[<>:"/\\|?*]/g, '_');
-                    authorFolder = `${safeNickname}(${uid})`;
-                }
-                
-                const config = CONFIG.DOWNLOAD_CONFIG.fileSystem;
-                const mediaFolder = mediaType === 'video' ? config.mediaTypeFolders.video : config.mediaTypeFolders.imagePost;
-                const fileNameFormat = mediaType === 'video' ? config.fileNameFormats.video : config.fileNameFormats.image;
-                
-                let fileName;
-                if (mediaType === 'video') {
-                    fileName = fileNameFormat.replace('{workId}', workId);
-                } else {
-                    fileName = fileNameFormat.replace('{workId}', workId).replace('{index}', '01');
-                }
-                
-                const filePath = `${platformName}/${authorFolder}/${mediaFolder}/${fileName}`;
-                
                 const record = {
                     workId: workId,
                     downloadTime: Date.now(),
-                    filePath,
+                    filePath: result.filePath || '',  // ✅ 使用 SingleDownloader 返回的路径
                     fileSize: result.fileSize || 0,
                     mediaType,
                     quality: 'origin'
@@ -597,10 +661,10 @@ class ContentScript {
     /**
      * 发送用户信息到侧边栏
      */
-    sendUserInfo(iframe) {
+    async sendUserInfo(iframe) {
         try {
-            // 从页面中获取用户信息
-            const userInfo = this.getUserInfoFromPage();
+            // ✅ 通过 platformAPI 获取用户信息（跨平台架构）
+            const userInfo = await platformAPI.getCurrentUser();
             
             if (userInfo) {
                 iframe.contentWindow.postMessage({
@@ -625,148 +689,19 @@ class ContentScript {
     }
 
     /**
-     * 从页面获取用户信息
-     */
-    getUserInfoFromPage() {
-        try {
-            logger.info('=== 开始获取用户信息 ===');
-            
-            let userInfo = null;
-            let successMethod = null;
-            const errors = []; // 记录每个方法的错误
-            
-            // 方法 1：从 __INITIAL_STATE__ 获取
-            if (window.__INITIAL_STATE__) {
-                try {
-                    const state = window.__INITIAL_STATE__;
-                    
-                    if (state.user?.info) {
-                        userInfo = state.user.info;
-                        successMethod = '方法 1: __INITIAL_STATE__.user.info';
-                    } else if (state.user) {
-                        userInfo = state.user;
-                        successMethod = '方法 1: __INITIAL_STATE__.user';
-                    }
-                } catch (e) {
-                    errors.push({ method: '方法 1', error: e.message });
-                }
-            }
-            
-            // 方法 2：从 RENDER_DATA script 标签获取
-            if (!userInfo) {
-                try {
-                    const el = document.getElementById('RENDER_DATA');
-                    if (el) {
-                        const text = el.innerText || el.textContent || '';
-                        if (text) {
-                            const data = JSON.parse(decodeURIComponent(text));
-                            
-                            if (data.app?.user?.info) {
-                                userInfo = data.app.user.info;
-                                successMethod = '方法 2: RENDER_DATA.app.user.info';
-                            } else if (data[1]?.user?.info) {
-                                userInfo = data[1].user.info;
-                                successMethod = '方法 2: RENDER_DATA[1].user.info';
-                            } else if (data.app?.user) {
-                                userInfo = data.app.user;
-                                successMethod = '方法 2: RENDER_DATA.app.user';
-                            } else if (data[1]?.user) {
-                                userInfo = data[1].user;
-                                successMethod = '方法 2: RENDER_DATA[1].user';
-                            }
-                        }
-                    }
-                } catch (e) {
-                    errors.push({ method: '方法 2', error: e.message });
-                }
-            }
-            
-            // 方法 3：从 SSR_RENDER_DATA_DOC 获取
-            if (!userInfo && window.SSR_RENDER_DATA_DOC) {
-                try {
-                    const data = window.SSR_RENDER_DATA_DOC;
-                    
-                    if (data.app?.user?.info) {
-                        userInfo = data.app.user.info;
-                        successMethod = '方法 3: SSR_RENDER_DATA_DOC.app.user.info';
-                    } else if (data[1]?.user?.info) {
-                        userInfo = data[1].user.info;
-                        successMethod = '方法 3: SSR_RENDER_DATA_DOC[1].user.info';
-                    } else if (data.app?.user) {
-                        userInfo = data.app.user;
-                        successMethod = '方法 3: SSR_RENDER_DATA_DOC.app.user';
-                    }
-                } catch (e) {
-                    errors.push({ method: '方法 3', error: e.message });
-                }
-            }
-            
-            // 方法 4：备用 - 从 API 获取
-            if (!userInfo) {
-                try {
-                    // TODO: 实现 API 请求（需要 platformAPI）
-                    // const apiUserInfo = await this.fetchUserInfoFromAPI();
-                    // if (apiUserInfo) {
-                    //     userInfo = apiUserInfo;
-                    //     successMethod = '方法 4: API 请求';
-                    // }
-                    
-                    errors.push({ method: '方法 4', error: '暂未实现' });
-                } catch (e) {
-                    errors.push({ method: '方法 4', error: e.message });
-                }
-            }
-            
-            // 处理获取到的用户信息
-            if (userInfo && userInfo.uid) {
-                // 提取收藏数（从 userCollectCount.collectCountList 中获取）
-                let collectCount = 0;
-                if (userInfo.userCollectCount?.collectCountList?.length > 0) {
-                    const firstItem = userInfo.userCollectCount.collectCountList[0];
-                    collectCount = firstItem.count || firstItem.collectCount || firstItem.num || 0;
-                }
-                
-                const result = {
-                    uid: userInfo.uid,
-                    platformId: userInfo.platformId || userInfo.sec_uid || '',  // ✅ 改为 platformId
-                    uniqueId: userInfo.uniqueId || userInfo.unique_id || userInfo.shortId || userInfo.short_id || '',
-                    nickname: userInfo.nickname || userInfo.nickName || '未知用户',
-                    favoritingCount: userInfo.favoritingCount || userInfo.favoriting_count || 0,
-                    followingCount: userInfo.followingCount || userInfo.following_count || 0,
-                    collectCount: collectCount
-                };
-                
-                logger.info(`✅ 用户信息获取成功 (${successMethod}):`, result.nickname, {
-                    uid: result.uid,
-                    followingCount: result.followingCount,
-                    favoritingCount: result.favoritingCount,
-                    collectCount: result.collectCount
-                });
-                
-                return result;
-            } else {
-                // ❌ 所有方法都失败了，输出详细错误信息
-                logger.error('❌ 所有方法均未获取到用户信息');
-                logger.error('=== 各方法失败原因 ===');
-                errors.forEach((err, index) => {
-                    logger.error(`  ${index + 1}. ${err.method}: ${err.error}`);
-                });
-                logger.error('=====================');
-                logger.error('💡 提示：请确保已登录抖音，并检查页面结构是否变化');
-                
-                return null;
-            }
-        } catch (error) {
-            logger.error('获取用户信息时发生未预期的错误:', error);
-            return null;
-        }
-    }
-
-    /**
      * 选择文件夹
      */
     async selectFolder(iframe) {
+        // ✅ 防止重复调用文件选择器
+        if (this.isSelectingFolder) {
+            logger.warn('⚠️ 文件选择器已在激活状态，忽略重复请求');
+            return;
+        }
+        
         try {
+            this.isSelectingFolder = true;
+            logger.info('📁 开始选择文件夹...');
+            
             // 使用 File System Access API
             if ('showDirectoryPicker' in window) {
                 // ✅ 浏览器通过 id 参数自动记忆上次选择的目录
@@ -780,6 +715,9 @@ class ContentScript {
                 fileSystem.setRootDirectory(dirHandle);
                 await fileSystem.init();
                 logger.info('✅ 文件系统已初始化');
+                
+                // ✅ 自动检查并恢复备份
+                await this.autoRestoreFromBackup();
                 
                 // 通知 dataFetcher 文件夹已选择
                 dataFetcher.setFolderSelected(true);
@@ -820,6 +758,121 @@ class ContentScript {
                     error: error.message
                 }, '*');
             }
+        } finally {
+            // ✅ 重置标志位
+            this.isSelectingFolder = false;
+            logger.info('🔓 文件选择器已释放');
+        }
+    }
+    
+    /**
+     * ✅ 自动检查并恢复备份
+     * 当选择文件夹后，检查 IndexedDB 是否为空，如果为空则从备份恢复
+     */
+    async autoRestoreFromBackup() {
+        try {
+            logger.info('🔍 检查 IndexedDB 状态...');
+    
+            // 检查 works 表是否为空
+            const allWorks = await database.getAll('works');
+            const worksCount = allWorks ? allWorks.length : 0;
+    
+            // ✅ 检查是否有备份文件
+            const { restoreManager } = await import('../data/backup/restore-manager.js');
+            const backupFiles = await restoreManager.findBackupFiles('works');
+    
+            // ✅ 只有一个判断：IndexedDB为空 AND 有备份文件
+            if (worksCount === 0 && backupFiles && backupFiles.length > 0) {
+                logger.info('ℹ️ IndexedDB 为空，开始从备份恢复...');
+                this._sendToSidebar({
+                    type: 'RESTORE_STARTING',
+                    message: '🔄 正在从备份恢复数据...'
+                });
+    
+                // 尝试恢复所有表
+                const tablesToRestore = [
+                    'works',
+                    'authors',
+                    'collects',
+                    'liked_group',
+                    'author_groups',
+                    'relations',
+                    'completed_works'
+                ];
+    
+                let restoredCount = 0;
+                const totalTables = tablesToRestore.length;
+    
+                for (let i = 0; i < tablesToRestore.length; i++) {
+                    const table = tablesToRestore[i];
+                    try {
+                        const result = await restoreManager.restoreFromBackup(table, { force: true });
+                            
+                        // ✅ 发送恢复进度消息
+                        this._sendToSidebar({
+                            type: 'RESTORE_PROGRESS',
+                            table: table,
+                            restored: result?.restored || 0,
+                            current: i + 1,
+                            total: totalTables
+                        });
+
+                        restoredCount += result.restored;
+                        logger.info(`✅ 恢复 ${table}: ${result.restored} 条记录`);
+
+                    } catch (error) {
+                        logger.warn(`⚠️ 恢复 ${table} 失败:`, error.message);
+                            
+                        // ✅ 发送失败进度
+                        this._sendToSidebar({
+                            type: 'RESTORE_PROGRESS',
+                            table: table,
+                            restored: 0,
+                            current: i + 1,
+                            total: totalTables
+                        });
+                    }
+                }
+    
+                // ✅ 通知侧边栏恢复完成
+                this._sendToSidebar({
+                    type: 'RESTORE_COMPLETED',
+                    success: restoredCount > 0,
+                    restoredCount: restoredCount,
+                    message: `成功恢复 ${restoredCount} 条记录`
+                });
+
+                logger.info(`✅ 自动恢复完成: 共恢复 ${restoredCount} 条记录`);
+            }
+
+        } catch (error) {
+            logger.error('❌ 自动恢复失败:', error);
+                
+            // ✅ 通知侧边栏恢复失败
+            this._sendToSidebar({
+                type: 'RESTORE_COMPLETED',
+                success: false,
+                restoredCount: 0,
+                message: `恢复失败: ${error.message}`
+            });
+                
+            // 不阻断后续流程，继续执行
+        }
+    }
+    
+    /**
+     * ✅ 发送消息到侧边栏
+     */
+    _sendToSidebar(data) {
+        const iframe = document.querySelector('iframe[src*="sidebar.html"]');
+        if (iframe && iframe.contentWindow) {
+            logger.info(`📤 发送消息到侧边栏: ${data.type}`);
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                ...data
+            }, '*');
+        } else {
+            logger.warn('⚠️ 未找到侧边栏 iframe，无法发送消息:', data.type);
         }
     }
 }

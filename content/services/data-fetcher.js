@@ -5,18 +5,99 @@
 
 import { CONFIG } from '../../config/constants.js';
 import { platformAPI } from '../../api/platform-adapter.js';
-import { mergeDataWithCache, mergeWorkData } from '../../utils/helpers.js';
 import { createLogger } from '../../utils/logger.js';
-import { fileSystem } from '../../data/file-system.js';
-import { backupManager } from '../../data/backup-manager.js';
-import * as relationManager from '../../data/relation-manager.js';
-import { database } from '../../data/database.js';
+import { fileSystem } from '../../data/storage/file-system.js';
+import * as worksManager from '../../data/storage/works-manager.js';
+import { backupManager } from '../../data/backup/backup-manager.js';
+import * as relationManager from '../../data/database/relation-manager.js';
 
 const logger = createLogger('DataFetcher');
 
 export class DataFetcher {
     constructor() {
         this.folderSelected = false;
+        this.fileSystem = fileSystem; // ✅ 初始化fileSystem
+        
+        // ✅ 列表配置映射（配置驱动）
+        this.listConfigs = {
+            liked: {
+                // API层
+                apiFetch: (params) => platformAPI.getLikedWorks(
+                    params.maxCount,
+                    params.onProgress,
+                    params.cachedIds,
+                    params.metadata
+                ),
+                
+                // 缓存层
+                cacheLoad: (fs) => worksManager.loadLikedWorks(fs),
+                cacheSave: (fs, data) => worksManager.saveLikedWorks(fs, {
+                    works: data.works,
+                    metadata: data.metadata
+                }),
+                
+                // 消息层
+                messages: {
+                    loaded: 'LIKED_WORKS_LOADED',
+                    progress: 'LIKED_WORKS_PROGRESS',
+                    error: 'LIKED_WORKS_ERROR',
+                    clear: 'CLEAR_LIKED_LIST',
+                    start: 'LOAD_DATA_START'
+                },
+                
+                // 关系层
+                relations: {
+                    groupType: 'liked_group',
+                    groupId: 'liked'
+                },
+                
+                // 默认值
+                defaults: {
+                    maxCount: CONFIG.FETCH_CONFIG.LIST_DEFAULTS.LIKED,
+                    folderRequired: true
+                }
+            },
+            
+            bookmarked: {
+                // API层
+                apiFetch: (params) => platformAPI.getCollectWorksIncremental(
+                    params.collectId,
+                    params.maxCount,
+                    params.onProgress,
+                    params.cachedIds,
+                    params.metadata
+                ),
+                
+                // 缓存层
+                cacheLoad: (fs, extraParams) => worksManager.loadBookmarkedWorks(fs, extraParams.collectId),
+                cacheSave: (fs, data) => worksManager.saveBookmarkedWorks(fs, {
+                    works: data.works,
+                    collectId: data.collectId,
+                    metadata: data.metadata
+                }),
+                
+                // 消息层
+                messages: {
+                    loaded: 'COLLECT_WORKS_LOADED',
+                    progress: 'COLLECT_WORKS_PROGRESS',
+                    error: 'COLLECT_WORKS_ERROR',
+                    clear: 'CLEAR_BOOKMARKED_LIST',
+                    start: 'LOAD_DATA_START'
+                },
+                
+                // 关系层
+                relations: {
+                    groupType: 'collect',
+                    groupId: null  // 动态设置
+                },
+                
+                // 默认值
+                defaults: {
+                    maxCount: CONFIG.FETCH_CONFIG.LIST_DEFAULTS.BOOKMARKED,
+                    folderRequired: true
+                }
+            }
+        };
     }
 
     /**
@@ -25,223 +106,266 @@ export class DataFetcher {
     setFolderSelected(status) {
         this.folderSelected = status;
     }
+    
+    /**
+     * ✅ 通用列表加载器（核心方法）
+     * @param {string} listType - 列表类型
+     * @param {HTMLIFrameElement} iframe - 通信目标
+     * @param {Object} extraParams - 额外参数
+     */
+    async _loadList(listType, iframe, extraParams = {}) {
+        const mergedData = await this._loadListInternal(listType, iframe, extraParams);
+        
+        if (mergedData) {
+            const config = this.listConfigs[listType];
+            this._sendMessage(iframe, config.messages.loaded, {
+                works: mergedData,
+                total: mergedData.length
+            });
+        }
+        
+        return mergedData;
+    }
+    
+    /**
+     * ✅ 内部加载逻辑（通用）
+     */
+    async _loadListInternal(listType, iframe, extraParams = {}) {
+        const config = this.listConfigs[listType];
+        if (!config) {
+            throw new Error(`未知的列表类型: ${listType}`);
+        }
+        
+        // 1. 前置检查
+        if (config.defaults.folderRequired && !this.folderSelected) {
+            logger.error('❌ 请先选择文件夹');
+            return null;
+        }
+        
+        // 2. 读取缓存
+        const cacheResult = await config.cacheLoad(this.fileSystem, extraParams);
+        const cachedWorks = cacheResult.works || [];
+        const metadata = cacheResult.metadata || {};
+        
+        logger.info(`📊 缓存中有 ${cachedWorks.length} 个作品`);
+        
+        // 3. 检查是否需要API请求
+        if (cachedWorks.length >= config.defaults.maxCount) {
+            logger.info(`✅ 缓存已有 ${cachedWorks.length} 个作品，跳过 API 请求`);
+            return cachedWorks;
+        }
+        
+        // 4. API增量获取
+        const cachedIds = cachedWorks.map(w => w.workId);
+        const onProgress = (current, total) => {
+            logger.info(`📈 进度: ${current}/${total}`);
+            
+            // ✅ 发送进度消息到Sidebar（仅在iframe存在时）
+            if (iframe) {
+                this._sendMessage(iframe, config.messages.progress, {
+                    currentCount: current,
+                    totalCount: total
+                });
+            }
+        };
+        
+        const apiResult = await config.apiFetch({
+            maxCount: config.defaults.maxCount,
+            cachedIds,
+            onProgress,
+            metadata,
+            ...extraParams
+        });
+        
+        const apiWorks = apiResult.works || [];
+        logger.info(`✅ API 返回 ${apiWorks.length} 个作品`);
+        
+        // 5. 合并数据
+        const mergedData = this._mergeWorks(cachedWorks, apiWorks);
+        logger.info(`✅ 合并后共 ${mergedData.length} 个作品`);
+        
+        // 6. 保存数据
+        await this._saveList(listType, {
+            apiWorks,
+            mergedData,
+            metadata,
+            apiResult,
+            ...extraParams
+        });
+        
+        return mergedData;
+    }
 
     /**
-     * 从 IndexedDB 加载点赞作品列表（不触发网络请求）
+     * ✅ 通用列表保存器
+     * @param {string} listType - 列表类型
+     * @param {Object} data - 数据对象
      */
-    async loadLikedWorksFromStorage(iframe) {
+    async _saveList(listType, data) {
+        const config = this.listConfigs[listType];
+        
+        // 没有新数据，不保存
+        if (!data.apiWorks || data.apiWorks.length === 0) {
+            logger.info('ℹ️ 没有新数据，跳过保存');
+            return;
+        }
+        
         try {
-            logger.info('开始从存储加载点赞列表...');
-
-            const result = await fileSystem.loadLikedWorks();
+            // 1. 保存到IndexedDB + 异步备份
+            await config.cacheSave(this.fileSystem, {
+                works: data.mergedData,
+                metadata: this._updateMetadata(data.metadata, data.apiResult),
+                ...data
+            });
+            
+            logger.info(`✅ 已保存最新列表: ${data.mergedData.length} 个作品`);
+            
+            // 2. 建立关系
+            await this.buildWorkAuthorRelations(
+                data.mergedData,
+                listType,
+                data.collectId
+            );
+            
+            // 3. 触发备份（异步，不阻塞主流程）
+            const batchCount = Math.ceil(data.apiWorks.length / 20);
+            const BACKUP_BATCH_INTERVAL = CONFIG.BACKUP_CONFIG.listBackup?.batchInterval || 5;
+            
+            if (batchCount >= BACKUP_BATCH_INTERVAL) {
+                logger.info(`🔄 已加载 ${batchCount} 批，触发备份...`);
+                // ✅ 异步触发备份，不等待完成
+                this._triggerBackup(listType).catch(err => {
+                    logger.warn('⚠️ 备份失败:', err.message);
+                });
+            }
+            
+        } catch (error) {
+            logger.warn('⚠️ 保存列表失败', error);
+            logger.warn('   错误类型:', typeof error);
+            logger.warn('   错误消息:', error?.message || '无消息');
+            logger.warn('   错误堆栈:', error?.stack || '无堆栈');
+        }
+    }
+    
+    /**
+     * ✅ 发送消息
+     */
+    _sendMessage(iframe, type, data = {}) {
+        iframe.contentWindow.postMessage({
+            source: 'content',
+            type,
+            ...data
+        }, '*');
+    }
+    
+    /**
+     * ✅ 发送错误消息
+     */
+    _sendError(iframe, errorType, message) {
+        this._sendMessage(iframe, errorType, { error: message });
+    }
+    
+    /**
+     * ✅ 合并作品（API优先）
+     */
+    _mergeWorks(cached, api) {
+        const workMap = new Map();
+        cached.forEach(work => workMap.set(work.workId, work));
+        api.forEach(work => workMap.set(work.workId, work));
+        return Array.from(workMap.values());
+    }
+    
+    /**
+     * ✅ 更新元数据
+     */
+    _updateMetadata(metadata, apiResult) {
+        return {
+            ...metadata,
+            lastMaxCursor: apiResult.cursor,
+            isFullyLoaded: !apiResult.hasMore
+        };
+    }
+    
+    /**
+     * ✅ 触发备份
+     */
+    async _triggerBackup(listType) {
+        const backupTables = [
+            'works',
+            'authors',
+            'collects',
+            'author_groups',
+            'relations'
+        ];
+        
+        // 根据列表类型添加特定的表
+        if (listType === 'liked') {
+            backupTables.push('liked_group');
+        }
+        
+        await backupManager.performSelectiveBackup(backupTables);
+    }
+    /**
+     * ✅ 从缓存加载列表（通用）
+     * @param {string} listType - 列表类型
+     * @param {HTMLIFrameElement} iframe - 通信目标
+     */
+    async _loadFromStorage(listType, iframe) {
+        const config = this.listConfigs[listType];
+        
+        try {
+            logger.info(`开始从存储加载${listType}列表...`);
+            
+            const result = await config.cacheLoad(this.fileSystem);
             const works = result.works || [];
-
+            
             if (works.length > 0) {
                 logger.info(`✅ 从存储加载 ${works.length} 个作品`);
             } else {
                 logger.info('📭 存储中没有数据');
             }
-
-            iframe.contentWindow.postMessage({
-                source: 'content',
-                type: 'LIKED_WORKS_LOADED',
+            
+            this._sendMessage(iframe, config.messages.loaded, {
                 works: works,
                 total: works.length,
                 fromCache: true
-            }, '*');
-
+            });
+            
         } catch (error) {
-            logger.error('从存储加载点赞列表失败', error);
-
-            iframe.contentWindow.postMessage({
-                source: 'content',
-                type: 'LIKED_WORKS_ERROR',
-                error: error.message
-            }, '*');
+            logger.error('从存储加载列表失败', error);
+            this._sendError(iframe, config.messages.error, error.message);
         }
+    }
+    
+    /**
+     * 从 IndexedDB 加载点赞作品列表（不触发网络请求）
+     */
+    async loadLikedWorksFromStorage(iframe) {
+        await this._loadFromStorage('liked', iframe);
     }
 
     /**
      * 加载点赞作品列表（从 API 获取并合并缓存）
      */
     async loadLikedWorks(iframe, maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.LIKED) {
-        try {
-            if (!this.folderSelected) {
-                logger.error('❌ 请先选择文件夹');
-
-                iframe.contentWindow.postMessage({
-                    source: 'content',
-                    type: 'LIKED_WORKS_ERROR',
-                    error: '请先点击"选择文件夹"按钮'
-                }, '*');
-                return;
-            }
-
-            // ✅ 先清空列表
-            iframe.contentWindow.postMessage({
-                source: 'content',
-                type: 'CLEAR_LIKED_LIST'
-            }, '*');
-
-            iframe.contentWindow.postMessage({
-                source: 'content',
-                type: 'LOAD_DATA_START',
-                listType: 'liked'
-            }, '*');
-
-            logger.info(`🚀 开始加载点赞列表 (max: ${maxCount})...`);
-
-            // ✅ 从存储加载缓存数据
-            let cacheResult = await fileSystem.loadLikedWorks();
-            let cachedWorks = cacheResult.works || [];
-            let metadata = cacheResult.metadata || {};
-
-            if (cachedWorks.length > 0) {
-                logger.info(`📊 缓存中有 ${cachedWorks.length} 个点赞作品`);
-                
-                // ✅ 立即显示缓存数据（用户体验优化）
-                iframe.contentWindow.postMessage({
-                    source: 'content',
-                    type: 'LIKED_WORKS_LOADED',
-                    works: cachedWorks,
-                    total: cachedWorks.length,
-                    fromCache: true  // 标记为缓存数据
-                }, '*');
-                
-                logger.info(`✅ 已立即显示 ${cachedWorks.length} 个缓存作品`);
-            }
-
-            // ✅ 前置判断：如果缓存数据已达到 maxCount，跳过 API 请求
-            if (cachedWorks.length >= maxCount) {
-                logger.info(`✅ 缓存已有 ${cachedWorks.length} 个作品（>= maxCount ${maxCount}），跳过 API 请求`);
-                
-                // 发送完成信号
-                iframe.contentWindow.postMessage({
-                    source: 'content',
-                    type: 'LIKED_WORKS_LOADED',
-                    works: cachedWorks,
-                    total: cachedWorks.length
-                }, '*');
-                
-                return; // 直接返回，不发起 API 请求
-            }
-
-            // ✅ 创建进度回调
-            const onProgress = (currentCount, totalCount) => {
-                if (iframe && iframe.contentWindow) {
-                    iframe.contentWindow.postMessage({
-                        source: 'content',
-                        type: 'LIKED_WORKS_PROGRESS',
-                        currentCount: currentCount,
-                        totalCount: totalCount
-                    }, '*');
-                }
-            };
-
-            // ✅ 调用 API 获取数据（仅当缓存不足时）
-            const cachedWorkIds = cachedWorks.map(w => w.workId);
-            const apiResult = await platformAPI.getLikedWorks(maxCount, onProgress, cachedWorkIds, metadata);
-            const apiWorks = apiResult.works || [];
-
-            logger.info(`✅ API 返回 ${apiWorks.length} 个点赞作品`);
-
-            // ✅ 合并数据（使用工具函数）
-            const { mergedData, newCount, updatedMetadata } = mergeWorkData(
-                cachedWorks,
-                apiWorks,
-                metadata,
-                'lastMaxCursor',
-                apiResult
-            );
-
-            // 🎯 发送数据到前端
-            iframe.contentWindow.postMessage({
-                source: 'content',
-                type: 'LIKED_WORKS_LOADED',
-                works: mergedData,
-                total: mergedData.length
-            }, '*');
-
-            logger.info(`✅ 加载完成: ${mergedData.length} 个点赞作品`);
-
-            // ✅ 保存数据到新架构
-            await this.saveLikedWorksData({
-                apiWorks,
-                newCount,
-                mergedData,
-                updatedMetadata
-            });
-
-        } catch (error) {
-            logger.error('获取点赞列表失败', error);
-
-            iframe.contentWindow.postMessage({
-                source: 'content',
-                type: 'LIKED_WORKS_ERROR',
-                error: error.message
-            }, '*');
-        }
-    }
-
-    /**
-     * 保存点赞作品数据（新架构）
-     */
-    async saveLikedWorksData(data) {
-        // 没有新数据，不保存
-        if (!data.apiWorks || (data.apiWorks.length === 0 && data.newCount === 0)) {
-            logger.info('ℹ️ 没有新数据，跳过保存');
-            return;
-        }
-
-        try {
-            // 1. 保存到 IndexedDB（主存储）+ 异步备份到文件系统
-            await fileSystem.saveLikedWorks({
-                works: data.mergedData,
-                metadata: data.updatedMetadata
-            });
-
-            logger.info(`✅ 已保存最新点赞列表: ${data.mergedData.length} 个作品`);
-
-            // 2. 建立作品与作者的关联关系 + 作品与点赞分组的关系
-            await this.buildWorkAuthorRelations(data.mergedData, 'liked');
-
-            // 3. ✅ 触发备份（列表加载完成后备份）
-            const batchCount = Math.ceil(data.apiWorks.length / 20); // API 每批 20 个
-            const BACKUP_BATCH_INTERVAL = CONFIG.BACKUP_CONFIG.listBackup?.batchInterval || 5;
-            
-            if (batchCount >= BACKUP_BATCH_INTERVAL) {
-                logger.info(`🔄 已加载 ${batchCount} 批，触发备份...`);
-                // ✅ 使用选择性备份，备份列表相关的所有表
-                await backupManager.performSelectiveBackup([
-                    'works',
-                    'authors',
-                    'collects',
-                    'author_groups',
-                    'liked_group',
-                    'relations'
-                ]);
-            }
-
-        } catch (error) {
-            logger.warn('⚠️ 保存点赞列表失败', error);
-            logger.warn('   错误类型:', typeof error);
-            logger.warn('   错误消息:', error?.message || '无消息');
-            logger.warn('   错误堆栈:', error?.stack || '无堆栈');
-        }
+        await this._loadList('liked', iframe, { maxCount });
     }
 
     /**
      * 建立作品与作者的关系
      * @param {Array} works - 作品列表（包括视频、图集等）
-     * @param {string} listType - 列表类型（'liked' | 'collected'）
-     * @param {string} collectId - 收藏夹ID（仅当 listType 为 'collected' 时需要）
+     * @param {string} listType - 列表类型（'liked' | 'bookmarked'）
+     * @param {string} collectId - 收藏夹ID（仅当 listType 为 'bookmarked' 时需要）
      */
     async buildWorkAuthorRelations(works, listType = 'liked', collectId = null) {
         try {
             const relations = [];
-            const now = Date.now();
+            const baseTime = Date.now();
 
-            for (const work of works) {
+            for (let i = 0; i < works.length; i++) {
+                const work = works[i];
+                // ✅ 使用递减的时间戳模拟操作时间（列表中越靠前的作品，操作时间越新）
+                const operationTime = baseTime - (i * 1); // 每个作品间隔1毫秒
                 // 1. 建立 作品 → 作者 的关系（始终建立）
                 if (work.author && work.author.uid) {
                     relations.push({
@@ -249,7 +373,7 @@ export class DataFetcher {
                         sourceId: work.workId,
                         targetType: 'author',
                         targetId: work.author.uid,
-                        createdAt: now
+                        createdAt: operationTime
                     });
                 }
 
@@ -261,16 +385,16 @@ export class DataFetcher {
                         sourceId: work.workId,
                         targetType: 'liked_group',
                         targetId: 'liked',
-                        createdAt: now
+                        createdAt: operationTime
                     });
-                } else if (listType === 'collected' && collectId) {
+                } else if (listType === 'bookmarked' && collectId) {
                     // 收藏列表：建立 作品 → collect 的关系
                     relations.push({
                         sourceType: 'work',
                         sourceId: work.workId,
                         targetType: 'collect',
                         targetId: collectId,
-                        createdAt: now
+                        createdAt: operationTime
                     });
                 }
             }

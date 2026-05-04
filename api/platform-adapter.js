@@ -112,6 +112,19 @@ class PlatformAdapter {
     }
 
     /**
+     * 判断当前页面是否为主页（平台特定）
+     *
+     * @returns {boolean} 是否为主页
+     */
+    isHomePage() {
+        if (!this.api.isHomePage) {
+            // 如果平台未实现此方法，默认返回 false
+            return false;
+        }
+        return this.api.isHomePage();
+    }
+
+    /**
      * 获取所有支持的平台列表
      *
      * @returns {Array<string>} 支持的平台名称数组
@@ -224,11 +237,11 @@ class PlatformAdapter {
      * @param {number} count - 每页数量
      * @returns {Promise<Object>} 收藏夹列表数据
      */
-    async getCollectsList(cursor = 0, count = 20) {
-        if (!this.api.getCollectsList) {
+    async getCollects(cursor = 0, count = 20) {
+        if (!this.api.getCollects) {
             throw new Error(`当前平台 (${this.currentPlatform}) 不支持获取收藏夹列表`);
         }
-        return this.api.getCollectsList(cursor, count);
+        return this.api.getCollects(cursor, count);
     }
 
     /**
@@ -247,17 +260,20 @@ class PlatformAdapter {
     }
 
     /**
-     * 获取收藏夹所有作品（用于批量下载）
+     * ✅ 增量获取收藏夹作品（支持缓存合并）
      *
      * @param {string} collectId - 收藏夹 ID
      * @param {number} maxCount - 最大获取数量
-     * @returns {Promise<Array>} 完整的作品列表
+     * @param {Function} onProgress - 进度回调
+     * @param {Array} cachedWorkIds - 缓存的作品ID列表
+     * @param {Object} metadata - 元数据
+     * @returns {Promise<Object>} { works, hasMore, cursor }
      */
-    async getCollectWorksForDownload(collectId, maxCount = CONFIG.FETCH_CONFIG.BATCH_MAX_COUNT) {
-        if (!this.api.getCollectWorksForDownload) {
-            throw new Error(`当前平台 (${this.currentPlatform}) 不支持获取收藏夹所有作品`);
+    async getCollectWorksIncremental(collectId, maxCount, onProgress, cachedWorkIds, metadata) {
+        if (!this.api.getCollectWorksIncremental) {
+            throw new Error(`当前平台 (${this.currentPlatform}) 不支持增量获取收藏夹作品`);
         }
-        return this.api.getCollectWorksForDownload(collectId, maxCount);
+        return this.api.getCollectWorksIncremental(collectId, maxCount, onProgress, cachedWorkIds, metadata);
     }
 
     /**

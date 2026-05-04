@@ -3,9 +3,9 @@
 // 职责：提供统一的数据持久化接口
 // ==========================================
 
-import { CONFIG } from '../config/constants.js';
-import { createLogger } from '../utils/logger.js';
-import { restoreManager } from './restore-manager.js';
+import { CONFIG } from '../../config/constants.js';
+import { createLogger } from '../../utils/logger.js';
+import { restoreManager } from '../backup/restore-manager.js';
 
 const logger = createLogger('Database');
 
@@ -385,7 +385,7 @@ export class Database {
             const result = await restoreManager.restoreFromBackup('completed_works');
             
             if (result.success) {
-                logger.info(`✅ 从备份恢复成功: ${result.totalRestored} 条记录`);
+                logger.info(`✅ 从备份恢复成功: ${result.restored} 条记录`);
             } else {
                 logger.info(`ℹ️ 未找到备份文件或恢复失败: ${result.reason || '未知原因'}`);
             }

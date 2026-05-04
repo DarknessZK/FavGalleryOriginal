@@ -5,7 +5,7 @@
 // ==========================================
 
 import { createLogger, logToUI } from '../utils/logger.js';
-import { databaseProxy } from '../data/database-proxy.js';
+import { databaseProxy } from '../data/database/database-proxy.js';
 import { CONFIG } from '../config/constants.js';
 
 const logger = createLogger('ListDisplayManager');
@@ -18,32 +18,31 @@ class ListDisplayManager {
     /**
      * 处理加载点赞作品列表请求
      */
-    handleLoadLikedVideos() {
+    handleLoadLikedWorks() {
         logger.info('🔄 开始加载点赞列表...');
-
+    
         // 检查是否已选择文件夹
         if (!this.app.folderSelected) {
             logger.error('❌ 请先选择文件夹');
-            alert('请先点击“选择文件夹”按钮');
+            alert('请先点击"选择文件夹"按钮');
             return;
         }
-
+    
+        // ✅ 禁用所有控制按钮（防止重复点击和误操作）
+        this.app.uiStateManager.disableAllControlButtons();
+            
+        // ✅ 禁用所有作品按钮
+        this.app.uiStateManager.disableAllWorkDownloadButtons();
+    
         // 设置加载状态
         this.app.isLoading = true;
-
+    
         // 发送消息到 Content Script
         window.parent.postMessage({
             source: 'sidebar',
             type: 'LOAD_LIKED_WORKS',
             maxCount: CONFIG.FETCH_CONFIG.LIST_DEFAULTS.LIKED
         }, '*');
-
-        // 显示加载状态
-        const statusDiv = document.getElementById('likedStatus');
-        if (statusDiv) {
-            statusDiv.textContent = '加载中...';
-            statusDiv.style.color = '#1890ff';
-        }
     }
 
     /**
@@ -74,6 +73,13 @@ class ListDisplayManager {
 
         // 初始化 DOM 元素
         likedManager.initElements();
+        
+        // ✅ 标记列表区域有数据，扩展到300px
+        const listSection = document.querySelector('.container > .section:nth-child(4)');
+        if (listSection && works.length > 0) {
+            listSection.classList.add('has-data');
+            logger.info('✅ 列表区域已标记为 has-data，扩展到300px');
+        }
 
         // ✅ 获取当前页的选中状态，传递给 updateUI
         const currentPageItems = likedManager.getCurrentPageData();
@@ -89,10 +95,78 @@ class ListDisplayManager {
             logger.info(`✅ 恢复了 ${selectedIds.length} 个作品的选中状态`);
         }
 
+        // ✅ 恢复所有控制按钮
+        this.app.uiStateManager.enableAllControlButtons();
+        
+        // ✅ 恢复作品按钮（pending/failed/error 状态变为可用）
+        this.app.uiStateManager.enableAllWorkDownloadButtons();
+
         // 重置加载状态
         this.app.isLoading = false;
 
         logger.info('✅ 点赞列表渲染完成');
+    }
+
+    /**
+     * ✅ 处理收藏夹作品加载完成
+     */
+    async handleCollectWorksLoaded(works, total, bookmarkedManager) {
+        logger.info(`✅ 收到收藏列表数据: ${total} 个作品`);
+
+        // ✅ UI 日志
+        logToUI('info', `✅ 加载完成: 共 ${total} 个作品`);
+
+        // ✅ 批量查询下载状态
+        const downloadedWorkIds = await this.getDownloadedWorkIds();
+        logger.info(`📋 从数据库查询到 ${downloadedWorkIds.size} 个已下载作品`);
+
+        // ✅ 合并下载状态到作品数据
+        const worksWithStatus = works.map(work => ({
+            ...work,
+            isDownloaded: downloadedWorkIds.has(work.workId)
+        }));
+
+        // 统计有多少作品标记为已下载
+        const downloadedCount = worksWithStatus.filter(w => w.isDownloaded).length;
+        logger.info(`📊 当前列表中 ${downloadedCount}/${worksWithStatus.length} 个作品已下载`);
+
+        // 设置数据到管理器
+        bookmarkedManager.setData(worksWithStatus);
+
+        // 初始化 DOM 元素
+        bookmarkedManager.initElements();
+
+        // ✅ 标记列表区域有数据，扩展到300px
+        const listSection = document.querySelector('.container > .section:nth-child(4)');
+        if (listSection && works.length > 0) {
+            listSection.classList.add('has-data');
+            logger.info('✅ 列表区域已标记为 has-data，扩展到300px');
+        }
+
+        // ✅ 获取当前页的选中状态，传递给 updateUI
+        const currentPageItems = bookmarkedManager.getCurrentPageData();
+        const selectedIds = currentPageItems
+            .filter(work => this.app.batchSelectionManager.state.bookmarked.selectedWorkIds.has(work.workId))
+            .map(work => work.workId);
+        logger.info(`🔍 初始渲染同步 checkbox: 当前页 ${currentPageItems.length} 个作品, 选中 ${selectedIds.length} 个`);
+
+        // ✅ 在渲染时直接传递选中状态，消除闪烁
+        bookmarkedManager.updateUI(new Set(selectedIds));
+
+        if (selectedIds.length > 0) {
+            logger.info(`✅ 恢复了 ${selectedIds.length} 个作品的选中状态`);
+        }
+
+        // ✅ 恢复所有控制按钮
+        this.app.uiStateManager.enableAllControlButtons();
+        
+        // ✅ 恢复作品按钮（pending/failed/error 状态变为可用）
+        this.app.uiStateManager.enableAllWorkDownloadButtons();
+
+        // 重置加载状态
+        this.app.isLoading = false;
+
+        logger.info('✅ 收藏列表渲染完成');
     }
 
     /**
@@ -113,43 +187,87 @@ class ListDisplayManager {
     /**
      * 刷新所有作品的下载状态（分页/搜索后调用）
      */
-    async refreshDownloadStatus(likedManager) {
+    /**
+     * ✅ 通用列表下载状态刷新方法
+     */
+    async refreshListDownloadStatus(manager) {
         try {
             const downloadedWorkIds = await this.getDownloadedWorkIds();
 
             // ✅ 更新 allWorks 中每个作品的 isDownloaded 状态
-            likedManager.allWorks.forEach(work => {
+            manager.allWorks.forEach(work => {
                 work.isDownloaded = downloadedWorkIds.has(work.workId);
             });
 
-            logger.info(`✅ 已刷新 ${likedManager.allWorks.length} 个作品的下载状态`);
+            logger.info(`✅ 已刷新 ${manager.allWorks.length} 个作品的下载状态`);
         } catch (error) {
             logger.error('❌ 刷新下载状态失败:', error);
         }
     }
 
     /**
+     * 刷新点赞作品列表的下载状态
+     */
+    async refreshDownloadStatus(likedManager) {
+        await this.refreshListDownloadStatus(likedManager);
+    }
+
+    /**
+     * ✅ 通用列表进度处理方法
+     */
+    handleListProgress(currentCount, totalCount, manager) {
+        manager.initElements();
+        manager.showProgress(currentCount, totalCount);
+    }
+
+    /**
      * 处理点赞作品列表加载进度
      */
     handleLikedWorksProgress(currentCount, totalCount, likedManager) {
-        likedManager.initElements();
-        likedManager.showProgress(currentCount, totalCount);
+        this.handleListProgress(currentCount, totalCount, likedManager);
+    }
+
+    /**
+     * ✅ 处理收藏作品列表加载进度
+     */
+    handleCollectWorksProgress(currentCount, totalCount, bookmarkedManager) {
+        this.handleListProgress(currentCount, totalCount, bookmarkedManager);
+    }
+
+    /**
+     * ✅ 通用列表错误处理方法
+     */
+    handleListError(error, manager) {
+        logger.error('❌ 列表加载失败:', error);
+
+        // ✅ UI 日志
+        logToUI('error', `❌ 加载失败: ${error}`);
+
+        manager.initElements();
+        manager.showError(error);
+
+        // ✅ 恢复所有控制按钮
+        this.app.uiStateManager.enableAllControlButtons();
+        
+        // ✅ 恢复作品按钮
+        this.app.uiStateManager.enableAllWorkDownloadButtons();
+
+        // 重置加载状态
+        this.app.isLoading = false;
     }
 
     /**
      * 处理点赞作品列表加载错误
      */
     handleLikedWorksError(error, likedManager) {
-        logger.error('❌ 点赞列表加载失败:', error);
+        this.handleListError(error, likedManager);
+    }
 
-        // ✅ UI 日志
-        logToUI('error', `❌ 加载失败: ${error}`);
-
-        likedManager.initElements();
-        likedManager.showError(error);
-
-        // 重置加载状态
-        this.app.isLoading = false;
+    /**
+     * ✅ 处理收藏作品列表加载错误
+     */
+    handleCollectWorksError(error, bookmarkedManager) {
+        this.handleListError(error, bookmarkedManager);
     }
 
     /**
@@ -158,6 +276,15 @@ class ListDisplayManager {
     clearLikedList(likedManager) {
         if (likedManager.elements.list) {
             likedManager.elements.list.innerHTML = '';
+        }
+    }
+    
+    /**
+     * ✅ 清空收藏列表
+     */
+    clearBookmarkedList(bookmarkedManager) {
+        if (bookmarkedManager.elements.list) {
+            bookmarkedManager.elements.list.innerHTML = '';
         }
     }
 

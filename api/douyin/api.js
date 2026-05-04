@@ -23,9 +23,9 @@
 //    - getAuthorWorksForList()
 //    - getAuthorWorksForDownload()
 // 6. 收藏夹方法 (L592-720)
-//    - getCollectsList()
+//    - getCollects()
 //    - getCollectWorksPage()
-//    - getCollectWorksForDownload()
+//    - getCollectWorksIncremental()
 // 7. 作品详情方法 (L722-786)
 //    - getWorkDetail()
 // ==========================================
@@ -71,6 +71,16 @@ export class DouyinAPI {
         this.webId = null;
         this.userInfo = null;
         console.log('[DouyinAPI] 状态已清理');
+    }
+
+    /**
+     * 判断当前页面是否为主页
+     *
+     * @returns {boolean} 是否为主页
+     */
+    isHomePage() {
+        const currentUrl = window.location.href;
+        return DOUYIN_CONFIG.HOME_PAGE_PATTERNS.some(pattern => currentUrl.includes(pattern));
     }
 
     // ==========================================
@@ -197,22 +207,16 @@ export class DouyinAPI {
             return this.userInfo;
         }
 
-        // 2. 从页面获取
+        // 2. 从页面获取（唯一方式）
         let userInfo = getUserInfoFromPage();
 
-        // 3. 如果页面没有，从 API 获取
-        if (!userInfo || !validateUserInfo(userInfo)) {
-            console.log('[DouyinAPI] 页面未找到用户信息，尝试从 API 获取...');
-            userInfo = await this._fetchUserInfoFromAPI();
-        }
-
-        // 4. 验证并缓存
+        // 3. 验证并缓存
         if (userInfo && validateUserInfo(userInfo)) {
             this.userInfo = userInfo;
             console.log('[DouyinAPI] ✅ 用户信息获取成功:', userInfo.nickname);
             return userInfo;
         } else {
-            console.warn('[DouyinAPI] ❌ 未获取到有效的用户信息');
+            console.warn('[DouyinAPI] ❌ 未获取到有效的用户信息（可能未登录）');
             return null;
         }
     }
@@ -323,7 +327,9 @@ export class DouyinAPI {
                 return this._handleAPIResponse(response);
             });
 
-            // 更新游标
+            // 更新游标（时间戳，用于获取更旧的作品）
+            // max_cursor 是这批作品中最旧的时间戳
+            // 下次请求传入此值，API 会返回比这个时间更早的作品
             if (data.max_cursor !== undefined && data.max_cursor !== null) {
                 maxCursor = data.max_cursor;
             }
@@ -419,7 +425,9 @@ export class DouyinAPI {
                 return this._handleAPIResponse(response);
             });
 
-            // 更新游标
+            // 更新游标（时间戳，用于获取更旧的作品）
+            // max_cursor 是这批作品中最旧的时间戳
+            // 下次请求传入此值，API 会返回比这个时间更早的作品
             if (data.max_cursor !== undefined && data.max_cursor !== null) {
                 maxCursor = data.max_cursor;
             }
@@ -516,7 +524,9 @@ export class DouyinAPI {
                 return this._handleAPIResponse(response);
             });
 
-            // 更新游标
+            // 更新游标（时间戳，用于获取更旧的作品）
+            // max_cursor 是这批作品中最旧的时间戳
+            // 下次请求传入此值，API 会返回比这个时间更早的作品
             if (data.max_cursor !== undefined && data.max_cursor !== null) {
                 maxCursor = data.max_cursor;
             }
@@ -748,11 +758,11 @@ export class DouyinAPI {
      * @returns {Promise<Object>} 包含收藏夹列表和分页信息的对象
      *
      * @example
-     * const result = await douyinAPI.getCollectsList(0, 20);
+     * const result = await douyinAPI.getCollects(0, 20);
      * console.log(result.collects); // 收藏夹数组
      * console.log(result.hasMore);  // 是否有更多
      */
-    async getCollectsList(cursor = 0, count = 20) {
+    async getCollects(cursor = 0, count = 20) {
         // 确保已获取用户信息
         await this.getCurrentUser();
 
@@ -781,16 +791,16 @@ export class DouyinAPI {
                 return this._handleAPIResponse(response);
             });
 
-            // 提取收藏夹列表
-            const collects = (data.collects_list || []).map(collect => ({
-                collectId: collect.collects_id || collect.id || '',
-                collectName: collect.name || '未命名收藏夹',
-                coverUrl: collect.cover?.url_list?.[0] || '',
-                workCount: collect.video_count || collect.num || 0,
-                isPublic: collect.is_public !== false,
-                createTime: collect.create_time || 0,
-                updateTime: collect.update_time || 0
-            }));
+            // 提取收藏夹列表（只保留文档定义的字段）
+            const collects = (data.collects_list || []).map(collect => {
+                return {
+                    collectId: collect.collects_id_str || String(collect.collects_id) || '',
+                    collectName: collect.collects_name || '未命名收藏夹',
+                    workCount: collect.total_number || 0,
+                    isDeleted: false,  // 默认未删除
+                    sortOrder: 0       // 默认排序
+                };
+            });
 
             return {
                 collects,
@@ -866,23 +876,23 @@ export class DouyinAPI {
     }
 
     /**
-     * 获取指定收藏夹的所有作品（用于批量下载）
-     * 自动处理所有分页，返回完整作品列表
-     *
-     * @param {string} collectId - 收藏夹 ID
-     * @param {number} maxCount - 最大获取数量（默认从配置读取）
-     * @returns {Promise<Array>} 完整的作品列表
+     * ✅ 增量获取收藏夹作品（支持缓存合并）
+     * @param {string} collectId - 收藏夹ID
+     * @param {number} maxCount - 最大获取数量
+     * @param {Function} onProgress - 进度回调
+     * @param {Set} cachedWorkIds - 缓存的作品ID集合
+     * @param {Object} metadata - 元数据
+     * @returns {Promise<Object>} { works, hasMore, cursor }
      */
-    async getCollectWorksForDownload(collectId, maxCount = CONFIG.FETCH_CONFIG.BATCH_MAX_COUNT) {
-        const allWorks = [];
+    async getCollectWorksIncremental(collectId, maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.BOOKMARKED, onProgress = null, cachedWorkIds = null, metadata = null) {
+        const cachedIds = cachedWorkIds ? new Set(cachedWorkIds) : null;
+        
+        // 定义批量获取函数
         let cursor = 0;
-        let hasMore = true;
-        let retryCount = 0;
-        const maxRetries = DOUYIN_CONFIG.RETRY_CONFIG.maxRetries;
-
-        while (hasMore && allWorks.length < maxCount) {
-            if (allWorks.length >= maxCount) break;
-
+        
+        const fetchBatch = async (currentCursor) => {
+            cursor = currentCursor || 0;
+            
             try {
                 const params = new URLSearchParams({
                     ...getDouyinDeviceParams(),
@@ -890,50 +900,63 @@ export class DouyinAPI {
                     cursor: cursor.toString(),
                     count: '20'
                 });
-
+                
                 const url = `${DOUYIN_CONFIG.API_ENDPOINTS.COLLECTS_VIDEOS}?${params}`;
-
+                
                 const response = await fetch(url, {
                     credentials: 'include',
                     headers: this._buildRequestHeaders()
                 });
-
+                
                 const data = await this._handleAPIResponse(response);
-
-                hasMore = data.has_more === 1 || data.has_more === true;
+                
+                const hasMore = data.has_more === 1 || data.has_more === true;
                 cursor = data.cursor || 0;
-
+                
                 const works = (data.aweme_list || []).map(work => {
                     return normalizeVideoData(work, {
                         getUrlQualitySelector: (urls) => getDouyinMediaUrl({ play_addr: { url_list: urls } })
                     });
                 });
-
-                allWorks.push(...works);
-                retryCount = 0;
-
-                console.log(`[DouyinAPI] 📊 已获取 ${allWorks.length} 个作品...`);
-
-                if (!hasMore || allWorks.length >= maxCount) break;
-
-                await delay(DOUYIN_CONFIG.REQUEST_DELAY.normal);
-
+                
+                return {
+                    data: works,
+                    hasMore,
+                    cursor
+                };
+                
             } catch (error) {
-                retryCount++;
-                console.error(`[DouyinAPI] ❌ 获取收藏夹作品失败 (第${retryCount}次):`, error.message);
-
-                if (retryCount >= maxRetries) {
-                    console.warn('[DouyinAPI] ⚠️ 达到最大重试次数，停止获取');
-                    break;
-                }
-
-                const retryDelay = DOUYIN_CONFIG.RETRY_CONFIG.baseDelay * 
-                                 Math.pow(DOUYIN_CONFIG.RETRY_CONFIG.backoffMultiplier, retryCount);
-                await delay(retryDelay);
+                logger.error(`❌ 获取收藏夹作品失败:`, error.message);
+                return {
+                    data: [],
+                    hasMore: false,
+                    cursor
+                };
             }
+        };
+        
+        // 使用通用智能增量获取函数
+        try {
+            const works = await smartIncrementalFetch(
+                fetchBatch,
+                cachedIds,
+                'workId',
+                maxCount,
+                onProgress,
+                {
+                    delayMs: DOUYIN_CONFIG.REQUEST_DELAY.normal,
+                    isFullyLoaded: metadata?.isFullyLoaded || false
+                }
+            );
+            
+            logger.info(`[收藏夹] 获取 ${works.length} 个作品`);
+            
+            return { works, hasMore: true, cursor };
+            
+        } catch (error) {
+            logger.error('获取收藏夹作品失败:', error);
+            throw error;
         }
-
-        return allWorks.slice(0, maxCount);
     }
 
     // ==========================================
@@ -993,3 +1016,5 @@ export class DouyinAPI {
         }
     }
 }
+
+

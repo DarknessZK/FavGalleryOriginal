@@ -1,15 +1,14 @@
 // ==========================================
 // FavGallery - 文件系统管理器
-// 职责：管理用户本地数据备份（IndexedDB 主存储 + 文件系统异步备份）
+// 职责：提供基础文件系统操作（IndexedDB 主存储 + 文件系统异步备份）
 // 说明：仅用于用户个人数据的本地备份和整理
 // ==========================================
 
-import { CONFIG } from '../config/constants.js';
-import { database } from './database.js';
-import { createLogger } from '../utils/logger.js';
-import { initFileLogger } from '../utils/file-logger.js';
-import * as relationManager from './relation-manager.js';
-import { sanitizeForFileSystem } from '../utils/helpers.js';
+import { CONFIG } from '../../config/constants.js';
+import { database } from '../database/database.js';
+import { createLogger } from '../../utils/logger.js';
+import { initFileLogger } from '../../utils/file-logger.js';
+import { sanitizeForFileSystem } from '../../utils/helpers.js';
 
 const logger = createLogger('FileSystem');
 
@@ -75,7 +74,7 @@ class FileSystem {
         
         // ✅ 启动定时备份（由 backupManager 管理）
         if (CONFIG.BACKUP_CONFIG?.enabled) {
-            import('./backup-manager.js').then(({ backupManager }) => {
+            import('../backup/backup-manager.js').then(({ backupManager }) => {
                 backupManager.startPeriodicBackup();
             });
         } else {
@@ -255,6 +254,31 @@ class FileSystem {
             }
             logger.error(`❌ 读取文件失败: ${filePath}`, error);
             throw error;
+        }
+    }
+
+    /**
+     * ✅ 列出目录中的所有文件名
+     *
+     * @param {string} dirPath - 目录路径
+     * @returns {Promise<string[]>} 文件名数组
+     */
+    async listDirectory(dirPath) {
+        try {
+            const dirHandle = await this._getOrCreateDirectory(this.rootDirectoryHandle, dirPath);
+            const fileNames = [];
+
+            for await (const entry of dirHandle.entries()) {
+                if (entry[1].kind === 'file') {
+                    fileNames.push(entry[0]);
+                }
+            }
+
+            logger.debug(`📂 列出目录: ${dirPath} (${fileNames.length} 个文件)`);
+            return fileNames;
+        } catch (error) {
+            logger.error(`❌ 列出目录失败: ${dirPath}`, error);
+            return [];
         }
     }
 
@@ -488,350 +512,7 @@ class FileSystem {
         this.writeLocks.set(filePath, false);
     }
 
-    // ==========================================
-    // 作者数据管理
-    // ==========================================
 
-    /**
-     * 保存作者基本信息到 IndexedDB + 异步备份到文件系统
-     *
-     * @param {Object} authorsData - 作者数据 { authors: [], metadata: {} }
-     */
-    async saveAuthorsBase(authorsData) {
-        await this.initDatabase();
-
-        // 保存到 IndexedDB（主存储）
-        const items = authorsData.authors.map((author, index) => ({
-            uid: author.uid,
-            order: index,
-            ...author
-        }));
-
-        await database.save('authors', items);
-        logger.info(`💾 已保存 ${items.length} 个作者到 IndexedDB`);
-
-        // 异步备份到文件系统
-        this._backupToFileSystem('authors_base', authorsData).catch(error => {
-            logger.warn('⚠️ 文件系统备份失败:', error.message);
-        });
-    }
-
-    /**
-     * 加载作者基本信息（IndexedDB 优先，降级到文件系统）
-     *
-     * @returns {Promise<Object>} { authors: [], metadata: {} }
-     */
-    async loadAuthorsBase() {
-        try {
-            await this.initDatabase();
-
-            // 1. 尝试从 IndexedDB 加载
-            let items;
-            try {
-                items = await database.getAll('authors');
-            } catch (dbError) {
-                if (dbError.name === 'InvalidStateError') {
-                    logger.warn('⚠️ IndexedDB 连接已关闭，降级到文件系统');
-                    items = null;
-                } else {
-                    throw dbError;
-                }
-            }
-
-            let authors = [];
-            if (items && items.length > 0) {
-                items.sort((a, b) => (a.order || 0) - (b.order || 0));
-                authors = items.map(({ order, ...author }) => author);
-                logger.info(`✅ 从 IndexedDB 加载 ${authors.length} 个作者`);
-            } else {
-                // 2. 降级到文件系统
-                logger.info('ℹ️ IndexedDB 无数据，尝试从文件系统加载...');
-                const content = await this.readTextFile(`${this.getMetadataDir()}/authors_base.js`);
-
-                if (content) {
-                    const data = this.deserializeData(content, 'authors_base');
-                    authors = data?.authors || [];
-                    logger.info(`✅ 从文件系统加载 ${authors.length} 个作者`);
-                }
-            }
-
-            // 3. 始终从文件系统加载 metadata
-            let metadata = {};
-            try {
-                const content = await this.readTextFile(`${this.getMetadataDir()}/authors_base.js`);
-                if (content) {
-                    const data = this.deserializeData(content, 'authors_base');
-                    metadata = data?.metadata || {};
-                }
-            } catch (error) {
-                logger.warn('⚠️ 加载 metadata 失败:', error.message);
-            }
-
-            return { authors, metadata };
-        } catch (error) {
-            logger.error('❌ 加载作者数据失败:', error);
-            return { authors: [], metadata: {} };
-        }
-    }
-
-    // ==========================================
-    // 点赞作品管理
-    // ==========================================
-
-    /**
-     * 保存点赞作品列表（新架构）
-     *
-     * @param {Object} data - 作品数据 { works: [], metadata: {} }
-     */
-    async saveLikedWorks(data) {  // ✅ 改为 saveLikedWorks
-        await this.initDatabase();
-
-        const works = data.works || data;  // ✅ 改为 works
-        
-        // 1. 保存作品元数据到 works store
-        const worksToSave = works.map((work, index) => ({  // ✅ 改为 work
-            workId: work.workId,
-            ...work
-        }));
-        await database.save('works', worksToSave);
-        
-        // 2. 建立作品-点赞关系
-        try {
-            const relations = works.map(work => ({  // ✅ 改为 work
-                sourceType: 'work',
-                sourceId: work.workId,
-                targetType: 'liked',
-                targetId: 'liked'
-            }));
-            await relationManager.batchAddRelations(relations);
-        } catch (err) {
-            logger.warn('⚠️ 建立关系失败:', err.message);
-        }
-        
-        // 3. 保存点赞分组元数据
-        await database.save('liked_group', {
-            groupId: 'liked',
-            groupName: '点赞',
-            workCount: works.length,  // ✅ 改为 works.length
-            lastUpdate: Date.now()
-        });
-        
-        logger.info(`💾 已保存 ${works.length} 个点赞作品到 IndexedDB`);
-
-        // 注意：备份由 backup-manager.js 统一处理，不在这里异步备份
-    }
-
-    /**
-     * 加载点赞作品列表（新架构）
-     *
-     * @returns {Promise<Object>} { works: [], metadata: {} }
-     */
-    async loadLikedWorks() {  // ✅ 改为 loadLikedWorks
-        try {
-            await this.initDatabase();
-
-            // 1. 从关系表获取所有点赞作品ID
-            const relations = await relationManager.getIncomingRelations('liked', 'liked');
-            const workIds = relations.map(r => r.sourceId);
-            
-            if (workIds.length > 0) {
-                // 2. 批量获取作品详情
-                const works = await database.getByIds('works', workIds);  // ✅ 改为 works
-                
-                logger.info(`✅ 从 IndexedDB 加载 ${works.length} 个点赞作品`);
-                
-                // 3. 加载元数据
-                const likedGroup = await database.get('liked_group', 'liked');
-                const metadata = likedGroup || {};
-                
-                return { works, metadata };  // ✅ 改为 works
-            }
-
-            // 4. 降级到文件系统
-            logger.info('ℹ️ IndexedDB 无数据，尝试从文件系统加载...');
-            const content = await this.readTextFile(`${this.getMetadataDir()}/liked_works.js`);  // ✅ 改为 liked_works
-
-            if (content) {
-                const data = this.deserializeData(content, 'liked_works');  // ✅ 改为 liked_works
-                const works = data?.works || [];  // ✅ 改为 works
-                logger.info(`✅ 从文件系统加载 ${works.length} 个点赞作品`);
-                
-                // ✅ 自动恢复到 IndexedDB
-                if (works.length > 0) {
-                    logger.info('🔄 正在从备份文件恢复数据到 IndexedDB...');
-                    try {
-                        await this.saveLikedWorks({
-                            works: works,
-                            metadata: data?.metadata || {}
-                        });
-                        logger.info('✅ 数据已恢复到 IndexedDB');
-                    } catch (restoreError) {
-                        logger.warn('⚠️ 恢复到 IndexedDB 失败，但不影响使用:', restoreError.message);
-                    }
-                }
-                
-                return { works, metadata: data?.metadata || {} };  // ✅ 改为 works
-            }
-
-            return { works: [], metadata: {} };  // ✅ 改为 works
-        } catch (error) {
-            logger.error('❌ 加载点赞作品失败:', error);
-            logger.error('   错误类型:', typeof error);
-            logger.error('   错误消息:', error?.message || '无消息');
-            logger.error('   错误堆栈:', error?.stack || '无堆栈');
-            return { works: [], metadata: {} };  // ✅ 改为 works
-        }
-    }
-
-    // ==========================================
-    // 收藏作品管理
-    // ==========================================
-
-    /**
-     * 保存收藏作品列表（新架构）
-     *
-     * @param {Object} data - 作品数据 { works: [], collectId: string }
-     */
-    async saveBookmarkedWorks(data) {  // ✅ 改为 saveBookmarkedWorks
-        await this.initDatabase();
-
-        const works = data.works || data;  // ✅ 改为 works
-        const collectId = data.collectId || data.collects_id;
-        
-        if (!collectId) {
-            throw new Error('缺少 collectId 参数');
-        }
-        
-        // 1. 保存作品元数据到 works store
-        const worksToSave = works.map((work, index) => ({  // ✅ 改为 work
-            workId: work.workId,
-            ...work
-        }));
-        await database.save('works', worksToSave);
-        
-        // 2. 建立作品-收藏夹关系
-        try {
-            const relations = works.map(work => ({  // ✅ 改为 work
-                sourceType: 'work',
-                sourceId: work.workId,
-                targetType: 'collect',
-                targetId: collectId
-            }));
-            await relationManager.batchAddRelations(relations);
-        } catch (err) {
-            logger.warn('⚠️ 建立关系失败:', err.message);
-        }
-        
-        // 3. 更新收藏夹元数据
-        await database.save('collects', {
-            collectId: collectId,
-            workCount: works.length,  // ✅ 改为 works.length
-            lastUpdate: Date.now()
-        });
-        
-        logger.info(`💾 已保存 ${works.length} 个收藏作品到 IndexedDB (收藏夹: ${collectId})`);
-
-        // 注意：备份由 backup-manager.js 统一处理，不在这里异步备份
-    }
-
-    /**
-     * 加载指定收藏夹的作品列表（新架构）
-     *
-     * @param {string} collectId - 收藏夹ID
-     * @returns {Promise<Object>} { works: [], metadata: {} }
-     */
-    async loadBookmarkedWorks(collectId) {  // ✅ 改为 loadBookmarkedWorks
-        try {
-            await this.initDatabase();
-
-            // 1. 从关系表获取收藏夹的所有作品ID
-            const workIds = await relationManager.getCollectWorkIds(collectId);
-            
-            if (workIds.length > 0) {
-                // 2. 批量获取作品详情
-                const works = await database.getByIds('works', workIds);  // ✅ 改为 works
-                
-                // 3. 按创建时间排序
-                works.sort((a, b) => (a.createTime || 0) - (b.createTime || 0));  // ✅ 改为 works
-                
-                logger.info(`✅ 从 IndexedDB 加载收藏夹 ${collectId} 的 ${works.length} 个作品`);
-                
-                // 4. 加载元数据
-                const collectInfo = await database.get('collects', collectId);
-                const metadata = collectInfo || {};
-                
-                return { works, metadata, collectId };  // ✅ 改为 works
-            }
-
-            // 5. 降级到文件系统
-            logger.info(`ℹ️ IndexedDB 无数据，尝试从文件系统加载收藏夹 ${collectId}...`);
-            const content = await this.readTextFile(`${this.getMetadataDir()}/bookmarked_works_${collectId}.js`);  // ✅ 改为 bookmarked_works
-
-            if (content) {
-                const data = this.deserializeData(content, `bookmarked_works_${collectId}`);  // ✅ 改为 bookmarked_works
-                const works = data?.works || [];  // ✅ 改为 works
-                logger.info(`✅ 从文件系统加载收藏夹 ${collectId} 的 ${works.length} 个作品`);
-                
-                // ✅ 自动恢复到 IndexedDB
-                if (works.length > 0) {
-                    logger.info(`🔄 正在从备份文件恢复收藏夹 ${collectId} 数据到 IndexedDB...`);
-                    try {
-                        await this.saveBookmarkedWorks({
-                            works: works,
-                            collectId: collectId,
-                            metadata: data?.metadata || {}
-                        });
-                        logger.info(`✅ 收藏夹 ${collectId} 数据已恢复到 IndexedDB`);
-                    } catch (restoreError) {
-                        logger.warn(`⚠️ 恢复收藏夹 ${collectId} 到 IndexedDB 失败，但不影响使用:`, restoreError.message);
-                    }
-                }
-                
-                return { works, metadata: data?.metadata || {}, collectId };  // ✅ 改为 works
-            }
-
-            return { works: [], metadata: {}, collectId };  // ✅ 改为 works
-        } catch (error) {
-            logger.error(`❌ 加载收藏夹 ${collectId} 失败:`, error);
-            return { works: [], metadata: {}, collectId };  // ✅ 改为 works
-        }
-    }
-
-    // ==========================================
-    // 收藏夹元数据管理
-    // ==========================================
-
-    /**
-     * 保存收藏夹列表元数据
-     *
-     * @param {Array} collectsList - 收藏夹列表
-     */
-    async saveCollectsList(collectsList) {
-        await this.initDatabase();
-        
-        const items = collectsList.map(collect => ({
-            collectId: collect.collectId || collect.collects_id,  // ✅ 改为 collectId，兼容旧字段
-            collectName: collect.collectName || collect.collects_name,  // ✅ 改为 collectName
-            workCount: collect.workCount || collect.video_count || 0,  // ✅ 改为 workCount
-            ...collect
-        }));
-        
-        await database.save('collects', items);
-        logger.info(`💾 已保存 ${items.length} 个收藏夹元数据`);
-    }
-
-    /**
-     * 加载所有收藏夹元数据
-     *
-     * @returns {Promise<Array>} 收藏夹列表
-     */
-    async loadAllCollects() {
-        await this.initDatabase();
-        
-        const collects = await database.getAll('collects');
-        logger.info(`✅ 加载 ${collects?.length || 0} 个收藏夹元数据`);
-        return collects || [];
-    }
 
     // ==========================================
     // 异步备份机制
@@ -892,7 +573,7 @@ class FileSystem {
      */
     close() {
         // ✅ 停止定时备份（由 backupManager 管理）
-        import('./backup-manager.js').then(({ backupManager }) => {
+        import('../backup/backup-manager.js').then(({ backupManager }) => {
             backupManager.stopPeriodicBackup();
         });
         

@@ -3,7 +3,7 @@
 // 功能：切换关注/点赞/收藏三个 Tab
 // ==========================================
 
-import { createLogger } from '../utils/logger.js';
+import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('TabManager');
 
@@ -63,9 +63,9 @@ export class TabManager {
     showTab(tabName) {
         const contentId = `tabContent${this.capitalize(tabName)}`;
         const contentEl = document.getElementById(contentId);
-        
+    
         if (contentEl) {
-            contentEl.style.display = 'block';
+            contentEl.style.display = 'flex'; // 使用flex而非block，保持CSS布局
         }
     }
 

@@ -27,6 +27,11 @@
         <div class="section-title">📁 存储位置</div>
         <button id="selectFolder" class="btn btn-primary">选择文件夹</button>
         <div id="folderStatus" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+        
+        <!-- ✅ 恢复状态提示条 -->
+        <div id="restoreStatus" style="display: none; margin-top: 10px; padding: 12px 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; font-size: 13px; color: white; line-height: 1.6; box-shadow: 0 4px 6px rgba(0,0,0,0.1); position: relative; z-index: 1000;">
+            <span id="restoreStatusText">🔄 正在从备份恢复数据...</span>
+        </div>
     </div>
 
     <!-- 关注列表 -->
@@ -79,7 +84,7 @@
                 <button id="followingNextPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">下一页</button>
             </div>
 
-            <div id="followingList" style="max-height: 300px; overflow-y: auto; margin-top: 10px;"></div>
+            <div id="followingList"></div>
         </div>
 
         <!-- 点赞列表内容 -->
@@ -92,7 +97,7 @@
                 <input
                         type="text"
                         id="likedSearchInput"
-                        placeholder="搜索视频描述或作者..."
+                        placeholder="搜索作品描述或作者..."
                         style="width: 100%; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px;"
                         disabled
                 >
@@ -103,8 +108,8 @@
                 <div style="display: flex; gap: 8px; align-items: center; flex-wrap: nowrap;">
                     <select id="likedBatchSelect" style="padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; min-width: 100px;">
                         <option value="">-- 批量选择 --</option>
-                        <option value="current">当前页视频</option>
-                        <option value="all">所有视频</option>
+                        <option value="current">当前页作品</option>
+                        <option value="all">所有作品</option>
                     </select>
                     <button class="batch-download-btn btn btn-primary" style="width: auto; padding: 4px 8px; font-size: 12px; white-space: nowrap;" disabled data-type="liked">
                         ⬇️ 批量保存 (<span id="likedSelectedCount" class="selected-count">0</span>)
@@ -122,7 +127,7 @@
                 <button id="likedNextPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">下一页</button>
             </div>
 
-            <div id="likedList" style="max-height: 300px; overflow-y: auto; margin-top: 10px;"></div>
+            <div id="likedList"></div>
         </div>
 
         <!-- 收藏列表内容 -->
@@ -130,34 +135,6 @@
             <!-- 顶部控制区 -->
             <button id="loadBookmarked" class="btn btn-primary" disabled>刷新收藏列表</button>
             <div id="bookmarkedStatus" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
-
-            <!-- 搜索框 -->
-            <div style="margin-top: 10px;">
-                <input
-                        type="text"
-                        id="bookmarkedSearchInput"
-                        placeholder="搜索视频描述或作者..."
-                        style="width: 100%; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px;"
-                        disabled
-                >
-            </div>
-
-            <!-- ✅ 批量操作栏 -->
-            <div id="bookmarkedBatchActions" style="margin-top: 10px; padding: 8px; background: #f0f0f0; border-radius: 4px;">
-                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: nowrap;">
-                    <select id="bookmarkedBatchSelect" style="padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; min-width: 100px;">
-                        <option value="">-- 批量选择 --</option>
-                        <option value="current">当前页视频</option>
-                        <option value="all">所有视频</option>
-                    </select>
-                    <button class="batch-download-btn btn btn-primary" style="width: auto; padding: 4px 8px; font-size: 12px; white-space: nowrap;" disabled data-type="bookmarked">
-                        ⬇️ 批量保存 (<span id="bookmarkedSelectedCount" class="selected-count">0</span>)
-                    </button>
-                    <button class="stop-download-btn btn btn-primary" style="width: auto; padding: 4px 8px; font-size: 12px; white-space: nowrap;" disabled>
-                        ⏹️ 批量停止
-                    </button>
-                </div>
-            </div>
 
             <!-- ✅ 收藏夹多选标签组件 -->
             <div id="collectsMultiSelect" style="display: none; margin-top: 10px; padding: 8px; background: #fafafa; border: 1px solid #e8e8e8; border-radius: 4px;">
@@ -177,8 +154,8 @@
 
                         <!-- 全选/清空按钮 -->
                         <div style="display: flex; gap: 4px;">
-                            <button id="selectAllCollects" style="flex: 1; padding: 3px 8px; border: 1px solid #1890ff; background: #fff; color: #1890ff; border-radius: 3px; font-size: 11px; cursor: pointer;">全选</button>
-                            <button id="clearAllCollects" style="flex: 1; padding: 3px 8px; border: 1px solid #d9d9d9; background: #fff; color: #666; border-radius: 3px; font-size: 11px; cursor: pointer;">清空</button>
+                            <button id="collectsSelectAll" style="flex: 1; padding: 3px 8px; border: 1px solid #1890ff; background: #fff; color: #1890ff; border-radius: 3px; font-size: 11px; cursor: pointer;">全选</button>
+                            <button id="collectsClearAll" style="flex: 1; padding: 3px 8px; border: 1px solid #d9d9d9; background: #fff; color: #666; border-radius: 3px; font-size: 11px; cursor: pointer;">清空</button>
                         </div>
                     </div>
 
@@ -194,31 +171,61 @@
 
             <!-- ✅ 收藏夹提示说明 -->
             <div id="collectsTip" style="display: none; margin-top: 8px; padding: 6px 10px; background: #fff7e6; border-left: 3px solid #faad14; border-radius: 4px; font-size: 11px; color: #d46b08; line-height: 1.5;">
-                💡 显示数量可能与实际不符（部分视频可能已失效）
+                💡 显示数量可能与实际不符（部分作品可能已失效）
             </div>
 
-            <!-- ✅ 收藏列表区域（包含分页和视频列表） -->
-            <div style="margin-top: 10px; display: flex; flex-direction: column; height: 300px;">
-                <!-- 分页控件 -->
-                <div id="bookmarkedPagination" style="text-align: center; padding: 5px 0;">
-                    <button id="bookmarkedPrevPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">上一页</button>
-                    <span id="bookmarkedPageInfo" style="margin: 0 10px; font-size: 13px;">第 1 页</span>
-                    <button id="bookmarkedNextPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">下一页</button>
+            <!-- 搜索框 -->
+            <div style="margin-top: 10px;">
+                <input
+                        type="text"
+                        id="bookmarkedSearchInput"
+                        placeholder="搜索作品描述或作者..."
+                        style="width: 100%; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px;"
+                        disabled
+                >
+            </div>
+
+            <!-- ✅ 批量操作栏 -->
+            <div id="bookmarkedBatchActions" style="margin-top: 10px; padding: 8px; background: #f0f0f0; border-radius: 4px;">
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: nowrap;">
+                    <select id="bookmarkedBatchSelect" style="padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; min-width: 100px;">
+                        <option value="">-- 批量选择 --</option>
+                        <option value="current">当前页作品</option>
+                        <option value="all">所有作品</option>
+                    </select>
+                    <button class="batch-download-btn btn btn-primary" style="width: auto; padding: 4px 8px; font-size: 12px; white-space: nowrap;" disabled data-type="bookmarked">
+                        ⬇️ 批量保存 (<span id="bookmarkedSelectedCount" class="selected-count">0</span>)
+                    </button>
+                    <button class="stop-download-btn btn btn-primary" style="width: auto; padding: 4px 8px; font-size: 12px; white-space: nowrap;" disabled>
+                        ⏹️ 批量停止
+                    </button>
                 </div>
-
-                <!-- 视频列表 -->
-                <div id="bookmarkedList" style="flex: 1; overflow-y: auto;"></div>
             </div>
+
+            <!-- 分页控件 -->
+            <div id="bookmarkedPagination" style="margin-top: 10px; text-align: center;">
+                <button id="bookmarkedPrevPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">上一页</button>
+                <span id="bookmarkedPageInfo" style="margin: 0 10px; font-size: 13px;">第 1 页</span>
+                <button id="bookmarkedNextPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">下一页</button>
+            </div>
+
+            <div id="bookmarkedList"></div>
 
         </div>
 
     </div>
 
-    <!-- 日志 -->
-    <div class="section">
-        <div class="section-title">📝 操作日志</div>
-        <div id="logArea" class="log-area"></div>
+</div>
+
+<!-- ✅ 悬浮日志便签插件 -->
+<div id="logSection" class="log-sticky-note collapsed">
+    <div class="log-header" id="logHeader">
+        <span class="log-title">📝 操作日志</span>
+        <button id="toggleLogBtn" class="log-toggle-btn" title="展开/收起日志">
+            ▲
+        </button>
     </div>
+    <div id="logArea" class="log-content"></div>
 </div>
 
 <script type="module" src="../../core/app.js"></script>

@@ -108,11 +108,12 @@ export const DOUYIN_CONFIG = {
      * 按顺序尝试从不同位置获取用户信息
      */
     USER_INFO_SOURCES: [
-        'SSR_RENDER_DATA.app.user.info',
-        'SSR_RENDER_DATA[1].user.info',
-        'SSR_RENDER_DATA.C_0.user.info',
-        'SSR_RENDER_DATA.app.user',
-        'SSR_RENDER_DATA[1].user',
+        '__INITIAL_STATE__.user.info',
+        '__INITIAL_STATE__.user',
+        'RENDER_DATA.app.user.info',
+        'RENDER_DATA[1].user.info',
+        'RENDER_DATA.app.user',
+        'RENDER_DATA[1].user',
         'SSR_RENDER_DATA_DOC.app.user.info',
         'SSR_RENDER_DATA_DOC[1].user.info',
         'SSR_RENDER_DATA_DOC.app.user'
@@ -128,6 +129,15 @@ export const DOUYIN_CONFIG = {
         'SSR_RENDER_DATA.C_0.odin.user_unique_id',
         'RENDER_DATA.app.odin.user_unique_id',
         'RENDER_DATA[1].odin.user_unique_id'
+    ],
+
+    /**
+     * 主页 URL 模式
+     * 用于判断当前页面是否为主页
+     */
+    HOME_PAGE_PATTERNS: [
+        '/jingxuan',
+        '/recommend'
     ]
 };
 

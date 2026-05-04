@@ -145,15 +145,19 @@ export class SingleDownloader {
 
             // ✅ 保存文件到文件系统
             let fileSize = 0;
+            let filePath = '';
             if (result.success) {
-                fileSize = await this.saveVideoFiles(result, folderPath, workDetail);
+                const saveResult = await this.saveVideoFiles(result, folderPath, workDetail);
+                fileSize = saveResult.fileSize;
+                filePath = saveResult.videoPath;  // ✅ 获取视频文件路径
             }
 
             return {
                 success: result.success,
                 workId: workDetail.workId,
                 error: result.error,
-                fileSize  // ✅ 返回文件大小
+                fileSize,  // ✅ 返回文件大小
+                filePath   // ✅ 返回文件路径（用于数据库记录）
             };
         } catch (error) {
             logger.error(`❌ 视频下载失败: ${workDetail.workId}`, error);
@@ -234,17 +238,18 @@ export class SingleDownloader {
 
     /**
      * 保存视频文件
-     * @returns {number} 文件大小（字节）
+     * @returns {Object} { fileSize, videoPath }
      */
     async saveVideoFiles(result, folderPath, work) {
         try {
             const { videoBlob, coverBlob } = result;
             let fileSize = 0;
+            let videoPath = '';
 
             // ✅ 保存视频文件（Blob）
             if (videoBlob) {
                 fileSize = videoBlob.size;  // ✅ 提取文件大小
-                const videoPath = this.generateVideoPath(work.workId, folderPath, work);
+                videoPath = this.generateVideoPath(work.workId, folderPath, work);
                 await this.fileSystem.saveBlobFile(videoPath, videoBlob);
                 logger.info(`✅ 视频保存成功（Blob）: ${work.workId}`);
             }
@@ -257,7 +262,7 @@ export class SingleDownloader {
             }
 
             logger.info(`✅ 视频保存成功: ${work.workId}`);
-            return fileSize;  // ✅ 返回文件大小
+            return { fileSize, videoPath };  // ✅ 返回文件大小和路径
         } catch (error) {
             logger.error(`❌ 保存视频文件失败: ${work.workId}`, error);
             throw error;
@@ -266,12 +271,13 @@ export class SingleDownloader {
 
     /**
      * 保存图集文件
-     * @returns {number} 总文件大小（字节）
+     * @returns {Object} { totalSize, firstImagePath }
      */
     async saveImagePostFiles(result, folderPath, work) {
         try {
             const { imageBlobs, musicBlob } = result;
             let totalSize = 0;
+            let firstImagePath = '';
 
             // ✅ 验证 imageBlobs 是否为数组
             if (!imageBlobs || !Array.isArray(imageBlobs)) {
@@ -304,6 +310,11 @@ export class SingleDownloader {
                     work
                 );
 
+                // ✅ 记录第一张图片路径（作为代表）
+                if (i === 0) {
+                    firstImagePath = imagePath;
+                }
+
                 await this.fileSystem.saveBlobFile(imagePath, blob);
                 logger.info(`✅ 第 ${i + 1} 张图片保存成功`);
             }
@@ -318,7 +329,7 @@ export class SingleDownloader {
             }
 
             logger.info(`✅ 图集保存成功: ${work.workId} (${imageBlobs.length} 张图片)`);
-            return totalSize;  // ✅ 返回总文件大小
+            return { totalSize, firstImagePath };  // ✅ 返回总大小和第一张图片路径
         } catch (error) {
             logger.error(`❌ 保存图集文件失败: ${work.workId}`, error);
             throw error;

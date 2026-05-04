@@ -6,8 +6,8 @@
 import { createLogger } from '../utils/logger.js';
 import { CONFIG } from '../config/constants.js';
 import { SingleDownloader } from './single-downloader.js';
-import { backupManager } from '../data/backup-manager.js';
-import { database } from '../data/database.js';
+import { backupManager } from '../data/backup/backup-manager.js';
+import { database } from '../data/database/database.js';
 
 const logger = createLogger('BatchDownloadManager');
 
@@ -135,14 +135,13 @@ export class BatchDownloadManager {
                 if (result.success) {
                     this.progress.success++;
                     
-                    // ✅ 方案 B：立即保存到数据库
+                    // ✅ 方案 B：立即保存到数据库（使用 SingleDownloader 返回的路径）
                     const mediaType = workDetail.isImagePost ? 'image_post' : 'video';
-                    const filePath = this.generateRelativeFilePath(workDetail, mediaType);
                     
                     await database.markAsDownloaded({
                         workId: workDetail.workId,
                         downloadTime: Date.now(),
-                        filePath,
+                        filePath: result.filePath || '',  // ✅ 使用 SingleDownloader 返回的路径
                         fileSize: result.fileSize || 0,
                         mediaType,
                         quality: 'origin'
@@ -356,43 +355,5 @@ export class BatchDownloadManager {
             logger.error('❌ 下载进度备份失败:', error);
             throw error;
         }
-    }
-    
-    /**
-     * 生成相对文件路径
-     * @param {Object} work - 作品对象
-     * @param {string} mediaType - 媒体类型
-     * @returns {string} 相对路径
-     */
-    generateRelativeFilePath(work, mediaType) {
-        // ✅ 统一使用 SingleDownloader 的路径生成逻辑
-        const platform = CONFIG.ACTIVE_PLATFORM;
-        const platformName = CONFIG.PLATFORM_INFO[platform]?.name || platform;
-        
-        // 提取作者信息
-        const author = work?.author;
-        let authorFolder = '未知作者';
-        if (author) {
-            const nickname = author.nickname || '未知用户';
-            const uid = author.uid || author.platformId || 'unknown';
-            // 清理昵称中的非法文件名字符
-            const safeNickname = nickname.replace(/[<>:"/\\|?*]/g, '_');
-            authorFolder = `${safeNickname}(${uid})`;
-        }
-        
-        const config = CONFIG.DOWNLOAD_CONFIG.fileSystem;
-        const mediaFolder = mediaType === 'video' ? config.mediaTypeFolders.video : config.mediaTypeFolders.imagePost;
-        const fileNameFormat = mediaType === 'video' ? config.fileNameFormats.video : config.fileNameFormats.image;
-        
-        let fileName;
-        if (mediaType === 'video') {
-            fileName = fileNameFormat.replace('{workId}', work.workId);
-        } else {
-            // 图集使用第一张图片作为代表
-            fileName = fileNameFormat.replace('{workId}', work.workId).replace('{index}', '01');
-        }
-        
-        // ✅ 完整路径：平台/作者昵称(uid)/视频或图集/workId.xxx
-        return `${platformName}/${authorFolder}/${mediaFolder}/${fileName}`;
     }
 }

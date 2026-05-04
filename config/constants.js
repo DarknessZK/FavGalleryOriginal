@@ -104,6 +104,69 @@ export const CONFIG = {
     },
     
     // ==========================================
+    // UI 配置
+    // ==========================================
+    
+    UI_CONFIG: {
+        /** 侧边栏配置 */
+        SIDEBAR: {
+            /** 侧边栏宽度（像素） */
+            WIDTH: 420,
+            
+            /** 收起状态宽度（像素） */
+            COLLAPSED_WIDTH: 0,
+            
+            /** 切换动画时长（秒） */
+            TRANSITION_DURATION: 0.3,
+            
+            /** z-index 层级 */
+            Z_INDEX: 999999,
+            
+            /** 切换按钮 z-index */
+            TOGGLE_BTN_Z_INDEX: 1000000,
+            
+            /** iframe 加载完成后发送用户信息的延迟时间（毫秒） */
+            IFRAME_LOAD_DELAY: 500,
+            
+            /** 容器样式 */
+            CONTAINER_STYLES: {
+                position: 'fixed',
+                top: '0',
+                left: '0',
+                height: '100vh'
+            },
+            
+            /** iframe 样式 */
+            IFRAME_STYLES: {
+                height: '100vh',
+                border: 'none',
+                overflow: 'hidden',
+                background: 'transparent'
+            },
+            
+            /** 切换按钮样式 */
+            TOGGLE_BUTTON_STYLES: {
+                position: 'fixed',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                width: '24px',
+                height: '48px',
+                background: '#fff',
+                border: '1px solid #e8e8e8',
+                borderLeft: 'none',
+                borderRadius: '0 4px 4px 0',
+                cursor: 'pointer',
+                fontSize: '12px',
+                color: '#666',
+                boxShadow: '2px 0 4px rgba(0,0,0,0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+            }
+        }
+    },
+    
+    // ==========================================
     // 数据获取配置
     // ==========================================
     
@@ -123,7 +186,10 @@ export const CONFIG = {
             LIKED: 100,            // 点赞列表
             BOOKMARKED: 60,       // 收藏列表
             AUTHOR_WORKS: 60      // 作者作品列表
-        }
+        },
+        
+        /** 收藏夹列表获取数量 */
+        COLLECTS_LIST_MAX_COUNT: 100
     },
     
     // ==========================================
@@ -255,8 +321,11 @@ export const CONFIG = {
          * 单个作品下载配置
          */
         single: {
-            /** 下载超时时间（毫秒）- 3分钟 */
+            /** 下载超时时间（毫秒）- 默认 3分钟，Content Script 中可覆盖为 5分钟 */
             timeout: 3 * 60 * 1000,
+            
+            /** Content Script 中的下载超时时间（毫秒）- 5分钟 */
+            contentScriptTimeout: 5 * 60 * 1000,
             
             /** 是否启用断点续传（检查文件是否存在） */
             enableResume: true,

@@ -4,7 +4,7 @@
 // ==========================================
 
 import { database } from './database.js';
-import { createLogger } from '../utils/logger.js';
+import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('RelationManager');
 
@@ -29,7 +29,8 @@ export async function batchAddRelations(relations) {
     const items = relations.map(rel => ({
         id: generateRelationId(rel.sourceType, rel.sourceId, rel.targetType, rel.targetId),
         ...rel,
-        createTime: Date.now()
+        // ✅ 优先使用传入的 createdAt，只有在没有提供时才使用当前时间
+        createdAt: rel.createdAt || Date.now()
     }));
 
     try {
