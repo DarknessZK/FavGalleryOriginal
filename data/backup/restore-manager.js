@@ -3,10 +3,10 @@
 // 职责：从文件系统备份恢复数据到 IndexedDB
 // ==========================================
 
-import { createLogger } from '../utils/logger.js';
-import { CONFIG } from '../config/constants.js';
-import { fileSystem } from './file-system.js';
-import { database } from './database.js';
+import { createLogger } from '../../utils/logger.js';
+import { CONFIG } from '../../config/constants.js';
+import { fileSystem } from '../storage/file-system.js';
+import { database } from '../database/database.js';
 import { backupManager } from './backup-manager.js';
 
 const logger = createLogger('RestoreManager');
@@ -30,7 +30,7 @@ class RestoreManager {
             const backupFiles = await this.findBackupFiles(dataType);
 
             if (backupFiles.length === 0) {
-                logger.warn(`⚠️ 未找到 ${dataType} 的备份文件`);
+                logger.info(`ℹ️ 未找到 ${dataType} 的备份文件（首次使用或无备份）`);
                 return { success: false, reason: 'no_backup_files' };
             }
 
@@ -62,7 +62,7 @@ class RestoreManager {
                 success: true,
                 dataType,
                 fileCount: backupFiles.length,
-                totalRestored
+                restored: totalRestored
             };
 
         } catch (error) {
@@ -112,7 +112,7 @@ class RestoreManager {
                 }
             } else {
                 // 其他类型单个文件
-                const filePath = `${metadataDir}/${dataType}_base.js`;
+                const filePath = `${metadataDir}/${dataType}.js`;
                 const exists = await fileSystem.fileExists(filePath);
 
                 if (exists) {
@@ -162,14 +162,23 @@ class RestoreManager {
                 // ✅ 使用 NDJSON 工具方法解析
                 records = await fileSystem.readNDJSON(filePath);
                 logger.info(`📖 解析 NDJSON: ${records.length} 条记录`);
-            } else if (dataType === 'works') {
-                // works 文件格式：{ works: [...], quarter: "2024_Q1" }
-                const backupData = JSON.parse(content);
-                records = backupData.works || [];
+            } else if (filePath.endsWith('.js')) {
+                // ✅ JS 文件格式：variableName = `{JSON}`;
+                const data = fileSystem.deserializeData(content, dataType);
+                
+                if (dataType === 'works') {
+                    // works 文件格式：{ works: [...], quarter: "2024_Q1" }
+                    records = data.works || [];
+                } else {
+                    // 其他格式：直接是数组或对象
+                    records = Array.isArray(data) ? data : (data[dataType] || []);
+                }
+                logger.info(`📖 解析 JS 文件: ${records.length} 条记录`);
             } else {
-                // 其他格式：{ authors: [...] } 或 { collects: [...] }
+                // JSON 格式（如 manifest.json）
                 const backupData = JSON.parse(content);
-                records = backupData[dataType] || [];
+                records = backupData[dataType] || backupData || [];
+                logger.info(`📖 解析 JSON: ${records.length} 条记录`);
             }
 
             if (records.length === 0) {

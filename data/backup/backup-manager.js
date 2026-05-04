@@ -3,10 +3,10 @@
 // 职责：管理数据备份和恢复，支持跨平台社交内容备份
 // ==========================================
 
-import { createLogger } from '../utils/logger.js';
-import { CONFIG } from '../config/constants.js';
-import { fileSystem } from './file-system.js';
-import { database } from './database.js';
+import { createLogger } from '../../utils/logger.js';
+import { CONFIG } from '../../config/constants.js';
+import { fileSystem } from '../storage/file-system.js';
+import { database } from '../database/database.js';
 
 const logger = createLogger('BackupManager');
 
@@ -335,7 +335,7 @@ class BackupManager {
 
             // 有变化才写入
             logger.info(`📝 ${tableName}: 检测到变化，执行备份 (${currentData.length} 条)`);
-            await this._backupToFileSystem(`${tableName}_base`, { [tableName]: currentData });
+            await this._backupToFileSystem(tableName, { [tableName]: currentData });
 
             // 更新哈希
             if (!manifest.hashes) {
@@ -599,7 +599,12 @@ class BackupManager {
             // 遍历指定的表，调用 _backupTableWithHash
             for (const tableName of tableNames) {
                 try {
-                    await this._backupTableWithHash(tableName, manifest, false);
+                    if (tableName === 'works') {
+                        // ✅ works 需要分片备份
+                        await this._backupWorksByQuarter(manifest, false);
+                    } else {
+                        await this._backupTableWithHash(tableName, manifest, false);
+                    }
                 } catch (error) {
                     logger.error(`❌ 备份 ${tableName} 失败:`, error);
                     hasFailure = true;

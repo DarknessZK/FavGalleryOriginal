@@ -50,12 +50,12 @@ export class UIStateManager {
         
         if (likedSearchInput) {
             likedSearchInput.disabled = false;
-            likedSearchInput.placeholder = '搜索视频描述或作者...';
+            likedSearchInput.placeholder = '搜索作品描述或作者...';
         }
         
         if (bookmarkedSearchInput) {
             bookmarkedSearchInput.disabled = false;
-            bookmarkedSearchInput.placeholder = '搜索视频描述或作者...';
+            bookmarkedSearchInput.placeholder = '搜索作品描述或作者...';
         }
         
         logger.info('✅ 按钮已启用');
@@ -69,6 +69,29 @@ export class UIStateManager {
         logger.info('设置加载状态:', statusText);
         
         // TODO: 后续可以添加更多加载状态控制
+    }
+
+    /**
+     * ✅ 设置恢复状态（显示/隐藏恢复提示条）
+     * @param {boolean} isRestoring - 是否正在恢复
+     * @param {string} message - 提示信息
+     */
+    setRestoreState(isRestoring, message = '') {
+        const restoreStatus = document.getElementById('restoreStatus');
+        const restoreStatusText = document.getElementById('restoreStatusText');
+        
+        if (restoreStatus && restoreStatusText) {
+            if (isRestoring) {
+                restoreStatus.style.display = 'block';
+                restoreStatusText.textContent = message || '🔄 正在从备份恢复数据...';
+                logger.info('🔄 显示恢复状态:', message);
+            } else {
+                restoreStatus.style.display = 'none';
+                logger.info('✅ 隐藏恢复状态');
+            }
+        } else {
+            logger.warn('⚠️ 未找到恢复状态元素');
+        }
     }
 
     /**
@@ -98,7 +121,7 @@ export class UIStateManager {
      */
     disableAllControlButtons() {
         // ✅ 1. 禁用功能按钮
-        const buttonIds = ['selectFolder', 'loadLiked'];
+        const buttonIds = ['selectFolder', 'loadLiked', 'loadBookmarked', 'loadFollowing'];
         
         buttonIds.forEach(id => {
             const btn = document.getElementById(id);
@@ -174,7 +197,7 @@ export class UIStateManager {
      */
     enableAllControlButtons() {
         // ✅ 1. 启用功能按钮
-        const buttonIds = ['selectFolder', 'loadLiked'];
+        const buttonIds = ['selectFolder', 'loadLiked', 'loadBookmarked', 'loadFollowing'];
         
         buttonIds.forEach(id => {
             const btn = document.getElementById(id);
@@ -257,6 +280,32 @@ export class UIStateManager {
     }
     
     /**
+     * ✅ 启用选择文件夹按钮
+     */
+    enableFolderButton() {
+        const btn = document.getElementById('selectFolder');
+        if (btn) {
+            btn.disabled = false;
+            btn.title = '';
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+        }
+    }
+    
+    /**
+     * ✅ 启用加载点赞按钮
+     */
+    enableLoadLikedButton() {
+        const btn = document.getElementById('loadLiked');
+        if (btn) {
+            btn.disabled = false;
+            btn.title = '';
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+        }
+    }
+    
+    /**
      * 启用所有作品卡片的下载按钮（pending/failed/error 状态）
      */
     enableAllWorkDownloadButtons() {
@@ -271,7 +320,7 @@ export class UIStateManager {
             if (!isCompleted) {
                 // ✅ 将"等待中"状态的按钮恢复到初始状态
                 if (text.includes('等待中')) {
-                    btn.innerHTML = '<span style="display: block; text-align: center;">💾 保存</span>';
+                    btn.innerHTML = '<span style="display: block; text-align: center;">⬇️ 保存</span>';
                     btn.style.background = '#1890ff';  // 蓝色
                     btn.style.cursor = 'pointer';
                     btn.disabled = false;

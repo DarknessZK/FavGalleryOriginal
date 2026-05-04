@@ -225,10 +225,10 @@ export class WorkListManager {
         const data = this.getCurrentPageData();
 
         // ✅ 动态导入渲染函数
-        import('./work-helpers.js').then(({ renderWorkList }) => {
+        import('./work-helpers.js').then(({ renderWorkList, renderAuthorList }) => {
             if (this.type === 'following') {
-                // TODO: 第二阶段实现作者列表渲染
-                logger.warn('⚠️ 作者列表渲染尚未实现');
+                // ✅ 渲染作者列表
+                renderAuthorList(this.elements.list, data);
             } else {
                 // 渲染作品列表，传递选中状态
                 renderWorkList(this.elements.list, data, selectedWorkIds);

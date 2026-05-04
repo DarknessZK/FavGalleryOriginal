@@ -11,24 +11,39 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     background: #fff;
     color: #333;
-    overflow-x: hidden;
-    overflow-y: hidden;
+    overflow-y: auto; /* 允许页面垂直滚动，窗口缩小时显示滚动条 */
 }
 
 .container {
     width: 100%;
-    height: 100vh;
+    /* height 由 JS 动态设置为初始视口高度 */
     padding: 20px 20px 0 20px;
     position: relative;
     display: flex;
     flex-direction: column;
+    box-sizing: border-box;
+}
+
+/* ✅ 主要内容区域（除日志外的所有部分） */
+.container > .header,
+.container > .section:not(#logSection):not(:nth-child(4)) {
+    flex-shrink: 0;
+}
+
+/* ✅ 关注/点赞/收藏列表所在的 section - 自动扩展填充剩余空间 */
+.container > .section:nth-child(4) {
+    flex: 1; /* 自动扩展填充剩余空间 */
+    display: flex;
+    flex-direction: column;
+    min-height: 0; /* 允许收缩 */
+    margin-bottom: 0; /* 移除底部边距，避免超出 */
 }
 
 .header {
     text-align: center;
     padding-bottom: 20px;
     border-bottom: 1px solid #e8e8e8;
-    margin-bottom: 20px;
+    margin-bottom: 15px; /* 替代container gap */
 }
 
 .header h1 {
@@ -43,8 +58,7 @@ body {
 }
 
 .section {
-    margin-bottom: 20px;
-    flex-shrink: 0;
+    margin-bottom: 15px; /* 替代container gap */
 }
 
 .section-title {
@@ -52,8 +66,11 @@ body {
     font-weight: bold;
     color: #333;
     margin-bottom: 10px;
-    padding-bottom: 5px;
-    border-bottom: 2px solid #1890ff;
+}
+
+/* ✅ 排除列表区域的section，其他section不收缩 */
+.container > .section:not(:nth-child(4)) {
+    flex-shrink: 0;
 }
 
 .btn {
@@ -79,17 +96,6 @@ body {
 .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-}
-
-.log-area {
-    flex: 1;
-    overflow-y: auto;
-    background: #f5f5f5;
-    padding: 10px;
-    border-radius: 4px 4px 0 0;
-    font-size: 12px;
-    line-height: 1.6;
-    min-height: 100px;
 }
 
 .log-entry {
@@ -213,7 +219,21 @@ body {
 }
 
 .tab-content {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 200px; /* ✅ 确保即使无数据也能看到控件 */
+    overflow: hidden; /* 防止内容溢出，由列表控制滚动 */
+    padding-bottom: 50px; /* 预留日志便签的空间 */
+}
+
+/* ✅ 列表区域 - 使用flex自动填充剩余空间 */
+#followingList,
+#likedList,
+#bookmarkedList {
+    flex: 1; /* 自动填充tab-content的剩余空间 */
+    overflow-y: auto; /* 显示滚动条 */
+    margin-top: 10px;
 }
 
 /* ✅ 收藏夹列表样式 */
@@ -273,17 +293,13 @@ body {
     overflow: hidden !important;
 }
 
-.collects-sidebar-collapsed #collectsList {
-    display: none;
-}
-
 /* ✅ 折叠按钮位置调整（相对于父容器） */
 .collects-sidebar-collapsed ~ #toggleCollectsSidebar {
     left: 0px !important;
     transform: rotate(180deg);
 }
 
-/* ✅ 视频来源标注样式 */
+/* ✅ 作品来源标注样式 */
 .video-source-tag {
     display: inline-block;
     margin-left: 6px;
@@ -422,16 +438,6 @@ body {
     font-size: 13px;
 }
 
-/* ✅ 日志区域的section需要特殊处理 */
-.section:last-child {
-    margin-bottom: 0;
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-}
-
 /* ✅ 作品卡片 hover 效果 */
 .work-item:hover {
     background: #e8e8e8 !important;
@@ -447,4 +453,94 @@ body {
     background: #fff;
     border-color: #40a9ff;
     box-shadow: 0 2px 6px rgba(64, 169, 255, 0.3);
+}
+
+/* ✅ 悬浮日志便签插件样式 */
+#logSection.log-sticky-note {
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    max-width: 400px; /* 限制最大宽度，类似侧边栏宽度 */
+    z-index: 9999;
+    background: #fff;
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.2);
+    border-radius: 8px 8px 0 0;
+    border-top: 3px solid #1890ff;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 收起状态 - 只显示标题栏 */
+#logSection.log-sticky-note.collapsed {
+    height: 40px;
+}
+
+/* 展开状态 - 遮罩效果 */
+#logSection.log-sticky-note:not(.collapsed) {
+    height: 300px;
+}
+
+.log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    background: linear-gradient(135deg, #1890ff 0%, #40a9ff 100%);
+    color: white;
+    cursor: pointer;
+    user-select: none;
+    font-size: 13px;
+    font-weight: bold;
+    height: 40px;
+    box-sizing: border-box;
+    border-radius: 8px 8px 0 0;
+}
+
+.log-title {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.log-toggle-btn {
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    padding: 0;
+    line-height: 1;
+}
+
+.log-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+    transform: scale(1.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.log-content {
+    height: calc(100% - 40px);
+    overflow-y: auto;
+    background: #fafafa;
+    padding: 12px 16px;
+    font-size: 12px;
+    line-height: 1.8;
+    border-top: 1px solid #e8e8e8;
+    border-radius: 0 0 8px 8px;
+}
+
+/* 收起时隐藏内容区 */
+#logSection.log-sticky-note.collapsed .log-content {
+    height: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
 }

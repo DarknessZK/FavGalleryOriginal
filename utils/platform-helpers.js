@@ -222,10 +222,28 @@ export function normalizeVideoData(rawData, options = {}) {
         video.pageUrl = rawData.share_url;
     }
 
+    // ✅ 处理 createTime：优先使用 create_time，如果不存在则尝试其他可能的字段
+    let createTime = rawData[mapping.createTime];
+    
+    // 如果 create_time 不存在或为0，尝试其他可能的时间字段
+    if (!createTime || createTime === 0) {
+        // 尝试其他常见的时间字段名
+        createTime = rawData['create_timestamp'] || 
+                     rawData['timestamp'] || 
+                     rawData['time'] || 
+                     0;
+    }
+    
+    // ✅ 统一转换为毫秒级时间戳（多平台兼容）
+    // 检测是否为秒级时间戳（小于100亿），如果是则转换为毫秒级
+    if (createTime && createTime > 0 && createTime < 10000000000) {
+        createTime = createTime * 1000;
+    }
+
     return {
         workId: rawData[mapping.id],                    // ✅ 改为 workId
         desc: rawData[mapping.description] || '',
-        createTime: rawData[mapping.createTime] || 0,
+        createTime: createTime,
 
         // 使用内部函数提取
         author: _extractAuthor(authorData),
@@ -288,14 +306,12 @@ export function normalizeAuthorData(rawData, options = {}) {
     return {
         uid: rawData[mapping.uid] || '',
         platformId: rawData[mapping.platformId] || rawData[mapping.platformId.replace('_', '')] || '',  // ✅ 改为 platformId
-        uniqueId: rawData[mapping.uniqueId] || rawData[mapping.uniqueId.replace('_', '')] || '',
         nickname: rawData[mapping.nickname] || '',
         avatarUrl,
-        signature: rawData[mapping.signature] || '',
         followerCount: rawData[mapping.followerCount] || rawData[mapping.followerCount.replace('_', '')] || 0,
         followingCount: rawData[mapping.followingCount] || rawData[mapping.followingCount.replace('_', '')] || 0,
         workCount: rawData[mapping.workCount] || rawData[mapping.workCount.replace('work', 'aweme').replace('_', '')] || 0,  // ✅ 改为 workCount
-        totalFavorited: rawData[mapping.totalFavorited] || rawData[mapping.totalFavorited.replace('_', '')] || 0
+        isDeleted: false  // ✅ 默认未删除
     };
 }
 
@@ -313,7 +329,8 @@ export function normalizeAuthorData(rawData, options = {}) {
 export function safeGet(obj, path, defaultValue = null) {
     if (!obj || !path) return defaultValue;
 
-    const keys = path.split('.');
+    // ✅ 支持数组索引，如 'RENDER_DATA[1].user.info'
+    const keys = path.replace(/\[(\d+)\]/g, '.$1').split('.');
     let result = obj;
 
     for (const key of keys) {

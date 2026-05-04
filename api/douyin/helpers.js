@@ -66,13 +66,106 @@ export function getDouyinWebId() {
  * @returns {Object|null} 标准化的用户信息，如果未找到则返回 null
  */
 export function getUserInfoFromPage() {
-    for (const source of DOUYIN_CONFIG.USER_INFO_SOURCES) {
-        const userInfo = safeGet(window, source);
-        if (userInfo && userInfo.uid) {
-            return normalizeUserInfo(userInfo);
+    try {
+        console.log('=== 开始获取用户信息 ===');
+
+        let userInfo = null;
+        let successMethod = null;
+        const errors = []; // 记录每个方法的错误
+
+        // 方法 1：从 __INITIAL_STATE__ 获取
+        if (window.__INITIAL_STATE__) {
+            try {
+                const state = window.__INITIAL_STATE__;
+
+                if (state.user?.info) {
+                    userInfo = state.user.info;
+                    successMethod = '方法 1: __INITIAL_STATE__.user.info';
+                } else if (state.user) {
+                    userInfo = state.user;
+                    successMethod = '方法 1: __INITIAL_STATE__.user';
+                }
+            } catch (e) {
+                errors.push({ method: '方法 1', error: e.message });
+            }
         }
+
+        // 方法 2：从 RENDER_DATA script 标签获取
+        if (!userInfo) {
+            try {
+                const el = document.getElementById('RENDER_DATA');
+                if (el) {
+                    const text = el.innerText || el.textContent || '';
+                    if (text) {
+                        const data = JSON.parse(decodeURIComponent(text));
+
+                        if (data.app?.user?.info) {
+                            userInfo = data.app.user.info;
+                            successMethod = '方法 2: RENDER_DATA.app.user.info';
+                        } else if (data[1]?.user?.info) {
+                            userInfo = data[1].user.info;
+                            successMethod = '方法 2: RENDER_DATA[1].user.info';
+                        } else if (data.app?.user) {
+                            userInfo = data.app.user;
+                            successMethod = '方法 2: RENDER_DATA.app.user';
+                        } else if (data[1]?.user) {
+                            userInfo = data[1].user;
+                            successMethod = '方法 2: RENDER_DATA[1].user';
+                        }
+                    }
+                }
+            } catch (e) {
+                errors.push({ method: '方法 2', error: e.message });
+            }
+        }
+
+        // 方法 3：从 SSR_RENDER_DATA_DOC 获取
+        if (!userInfo && window.SSR_RENDER_DATA_DOC) {
+            try {
+                const data = window.SSR_RENDER_DATA_DOC;
+
+                if (data.app?.user?.info) {
+                    userInfo = data.app.user.info;
+                    successMethod = '方法 3: SSR_RENDER_DATA_DOC.app.user.info';
+                } else if (data[1]?.user?.info) {
+                    userInfo = data[1].user.info;
+                    successMethod = '方法 3: SSR_RENDER_DATA_DOC[1].user.info';
+                } else if (data.app?.user) {
+                    userInfo = data.app.user;
+                    successMethod = '方法 3: SSR_RENDER_DATA_DOC.app.user';
+                }
+            } catch (e) {
+                errors.push({ method: '方法 3', error: e.message });
+            }
+        }
+
+        // 处理获取到的用户信息
+        if (userInfo && userInfo.uid) {
+            const result = normalizeUserInfo(userInfo);
+
+            console.log(`✅ 用户信息获取成功 (${successMethod}):`, result.nickname, {
+                uid: result.uid,
+                followingCount: result.followingCount,
+                favoritingCount: result.favoritingCount,
+                collectCount: result.collectCount
+            });
+
+            return result;
+        } else {
+            // ❌ 所有方法都失败了，输出详细错误信息
+            console.error('❌ 所有方法均未获取到用户信息');
+            console.error('=== 各方法失败原因 ===');
+            errors.forEach((err, index) => {
+                console.error(`  ${index + 1}. ${err.method}: ${err.error}`);
+            });
+            console.error('=====================');
+            console.error('💡 提示：请确保已登录抖音，并检查页面结构是否变化');
+            return null;
+        }
+    } catch (error) {
+        console.error('获取用户信息时发生未预期的错误:', error);
+        return null;
     }
-    return null;
 }
 
 /**

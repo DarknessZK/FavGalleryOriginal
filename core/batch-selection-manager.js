@@ -85,11 +85,7 @@ class BatchSelectionManager {
         if (listType === 'liked') {
             allItems = this.app.likedManager.allWorks || [];
         } else if (listType === 'bookmarked') {
-            logger.warn('⚠️ 收藏列表尚未实现');
-            return;
-        } else if (listType === 'following') {
-            logger.warn('⚠️ 关注列表尚未实现');
-            return;
+            allItems = this.app.bookmarkedManager.allWorks || [];
         }
         
         // ✅ 根据选择类型设置选中状态
@@ -112,7 +108,7 @@ class BatchSelectionManager {
         const selectedCount = this.getSelectedCount(listType);
         if (selectedCount > 0) {
             import('../utils/logger.js').then(({ logToUI }) => {
-                logToUI('info', `📋 已选中 ${selectedCount} 个${listType === 'following' ? '作者' : '作品'}`);
+                logToUI('info', `📋 已选中 ${selectedCount} 个作品`);
             });
         } else {
             import('../utils/logger.js').then(({ logToUI }) => {
@@ -139,43 +135,28 @@ class BatchSelectionManager {
             const startIndex = (this.app.likedManager.currentPage - 1) * this.app.likedManager.pageSize;
             const endIndex = startIndex + this.app.likedManager.pageSize;
             currentPageItems = allItems.slice(startIndex, endIndex);
+        } else if (listType === 'bookmarked') {
+            const startIndex = (this.app.bookmarkedManager.currentPage - 1) * this.app.bookmarkedManager.pageSize;
+            const endIndex = startIndex + this.app.bookmarkedManager.pageSize;
+            currentPageItems = allItems.slice(startIndex, endIndex);
         }
         
         // ✅ 智能切换逻辑
-        const currentPageIds = currentPageItems.map(item => 
-            listType === 'following' ? item.authorId : item.workId
-        );
-        const allChecked = currentPageIds.every(id => 
-            listType === 'following' ? state.selectedAuthorIds.has(id) : state.selectedWorkIds.has(id)
-        );
+        const currentPageIds = currentPageItems.map(item => item.workId);
+        const allChecked = currentPageIds.every(id => state.selectedWorkIds.has(id));
         
         if (allChecked && currentPageIds.length > 0) {
             logger.info('✅ 当前页已全部选中，执行取消选择');
-            currentPageIds.forEach(id => {
-                if (listType === 'following') {
-                    state.selectedAuthorIds.delete(id);
-                } else {
-                    state.selectedWorkIds.delete(id);
-                }
-            });
+            currentPageIds.forEach(id => state.selectedWorkIds.delete(id));
             state.selectAll = false;
             this.syncCheckboxes(listType, []);
         } else {
             logger.info('✅ 执行选中当前页');
-            if (listType === 'following') {
-                state.selectedAuthorIds.clear();
-            } else {
-                state.selectedWorkIds.clear();
-            }
+            state.selectedWorkIds.clear();
             state.selectAll = false;
             
             currentPageItems.forEach(item => {
-                const id = listType === 'following' ? item.authorId : item.workId;
-                if (listType === 'following') {
-                    state.selectedAuthorIds.add(id);
-                } else {
-                    state.selectedWorkIds.add(id);
-                }
+                state.selectedWorkIds.add(item.workId);
             });
             
             this.syncCheckboxes(listType, currentPageIds);
@@ -190,48 +171,27 @@ class BatchSelectionManager {
     selectAllItems(listType, allItems) {
         const state = this.state[listType];
         
-        const allIds = allItems.map(item => 
-            listType === 'following' ? item.authorId : item.workId
-        );
-        const allChecked = allIds.every(id => 
-            listType === 'following' ? state.selectedAuthorIds.has(id) : state.selectedWorkIds.has(id)
-        );
+        const allIds = allItems.map(item => item.workId);
+        const allChecked = allIds.every(id => state.selectedWorkIds.has(id));
         
         if (allChecked && allIds.length > 0) {
             logger.info('✅ 所有项已全部选中，执行取消选择');
-            allIds.forEach(id => {
-                if (listType === 'following') {
-                    state.selectedAuthorIds.delete(id);
-                } else {
-                    state.selectedWorkIds.delete(id);
-                }
-            });
+            allIds.forEach(id => state.selectedWorkIds.delete(id));
             state.selectAll = false;
             
             const currentPageItems = this.getCurrentPageItems(listType, allItems);
             this.syncCheckboxes(listType, []);
         } else {
             logger.info('✅ 执行选中全部');
-            if (listType === 'following') {
-                state.selectedAuthorIds.clear();
-            } else {
-                state.selectedWorkIds.clear();
-            }
+            state.selectedWorkIds.clear();
             state.selectAll = true;
             
             allItems.forEach(item => {
-                const id = listType === 'following' ? item.authorId : item.workId;
-                if (listType === 'following') {
-                    state.selectedAuthorIds.add(id);
-                } else {
-                    state.selectedWorkIds.add(id);
-                }
+                state.selectedWorkIds.add(item.workId);
             });
             
             const currentPageItems = this.getCurrentPageItems(listType, allItems);
-            this.syncCheckboxes(listType, currentPageItems.map(item => 
-                listType === 'following' ? item.authorId : item.workId
-            ));
+            this.syncCheckboxes(listType, currentPageItems.map(item => item.workId));
         }
         
         logger.info(`✅ 已处理全部: ${allItems.length} 个`);
@@ -244,11 +204,7 @@ class BatchSelectionManager {
         const state = this.state[listType];
         if (!state) return;
         
-        if (listType === 'following') {
-            state.selectedAuthorIds.clear();
-        } else {
-            state.selectedWorkIds.clear();
-        }
+        state.selectedWorkIds.clear();
         state.selectAll = false;
         
         this.syncCheckboxes(listType, []);
@@ -265,6 +221,10 @@ class BatchSelectionManager {
             const startIndex = (this.app.likedManager.currentPage - 1) * this.app.likedManager.pageSize;
             const endIndex = startIndex + this.app.likedManager.pageSize;
             return allItems.slice(startIndex, endIndex);
+        } else if (listType === 'bookmarked') {
+            const startIndex = (this.app.bookmarkedManager.currentPage - 1) * this.app.bookmarkedManager.pageSize;
+            const endIndex = startIndex + this.app.bookmarkedManager.pageSize;
+            return allItems.slice(startIndex, endIndex);
         }
         return [];
     }
@@ -279,10 +239,17 @@ class BatchSelectionManager {
         
         // ✅ 延迟执行，确保 DOM 已完全渲染
         setTimeout(() => {
-            const checkboxes = document.querySelectorAll(`#${tabContentId} .work-checkbox`);
+            // ✅ 关注列表使用 data-uid，作品列表使用 data-work-id
+            const selector = listType === 'following' ? 
+                `#${tabContentId} [data-uid]` : 
+                `#${tabContentId} .work-checkbox`;
+            const checkboxes = document.querySelectorAll(selector);
             
             checkboxes.forEach(checkbox => {
-                const itemId = checkbox.dataset.workId;
+                // ✅ 根据列表类型获取 ID
+                const itemId = listType === 'following' ? 
+                    checkbox.dataset.uid : 
+                    checkbox.dataset.workId;
                 const shouldBeChecked = selectedIds.includes(itemId);
                 
                 // ✅ 只更新未禁用的 checkbox 的 checked 状态
@@ -307,11 +274,13 @@ class BatchSelectionManager {
         }
         
         if (batchDownloadBtn) {
-            const shouldDisable = selectedCount === 0 || this.app.isDownloading;
+            // ✅ 从 downloadHandler 获取下载状态
+            const downloadState = this.app.downloadHandler ? this.app.downloadHandler.getDownloadState() : { isDownloading: false };
+            const shouldDisable = selectedCount === 0 || downloadState.isDownloading;
             batchDownloadBtn.disabled = shouldDisable;
             batchDownloadBtn.style.opacity = shouldDisable ? '0.5' : '1';
             batchDownloadBtn.style.cursor = shouldDisable ? 'not-allowed' : 'pointer';
-            batchDownloadBtn.title = this.app.isDownloading ? '保存进行中...' : (selectedCount > 0 ? '保存选中作品' : '请先选择作品');
+            batchDownloadBtn.title = downloadState.isDownloading ? '保存进行中...' : (selectedCount > 0 ? '保存选中作品' : '请先选择作品');
         }
     }
 

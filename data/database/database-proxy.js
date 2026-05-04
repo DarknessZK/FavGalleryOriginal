@@ -3,7 +3,7 @@
 // 职责：通过消息通信访问 Content Script 的数据库
 // ==========================================
 
-import { createLogger } from '../utils/logger.js';
+import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('DatabaseProxy');
 

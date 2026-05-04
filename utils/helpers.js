@@ -13,6 +13,13 @@ const logger = createLogger('Helpers');
  * 智能增量获取（通用分页获取函数）
  * 支持增量去重，避免重复获取已存在的数据
  *
+ * 工作原理：
+ * 1. API 返回的数据是从新到旧排序的
+ * 2. cursor 是时间戳游标，用于获取更旧的数据（不是页码）
+ * 3. 每次请求传入上一批返回的 cursor，API 返回比这个时间更早的作品
+ * 4. 通过检查 ID 是否在缓存中，判断是否有新作品
+ * 5. 如果遇到已存在的 ID，说明后面都是更旧的、已缓存的作品，可以停止
+ *
  * @param {Function} fetchFn - 获取单页数据的函数 (cursor) => Promise<{data, hasMore, cursor}>
  * @param {Set|null} cachedIds - 缓存的 ID 集合（用于去重），null 表示不去重
  * @param {string} idField - ID 字段名（如 'workId'、'uid'）
@@ -168,7 +175,7 @@ export function mergeDataWithCache(cachedData, apiData, idField, defaultFields =
         }
     });
 
-    // 🎯 关键修复：找出缓存中有但 API 中没有的数据（已被取消关注/点赞/收藏的视频）
+    // 🎯 关键修复：找出缓存中有但 API 中没有的数据（已被取消关注/点赞/收藏的作品）
     const apiIds = new Set(apiData.map(item => item[idField]));
     const onlyInCache = cachedData.filter(item => !apiIds.has(item[idField]));
     

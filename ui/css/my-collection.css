@@ -350,7 +350,7 @@ body {
     color: #999;
 }
 
-/* 视频卡片 */
+/* 作品卡片 */
 .video-card {
     border: 1px solid #e8e8e8;
     border-radius: 8px;
@@ -367,7 +367,7 @@ body {
     z-index: 10;
 }
 
-/* 状态角标（视频） */
+/* 状态角标（作品） */
 .video-card .status-badge {
     position: absolute;
     top: 8px;

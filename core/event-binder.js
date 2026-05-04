@@ -25,13 +25,22 @@ class EventBinder {
         this.bindTabSwitching();
 
         // 3. 刷新点赞列表
-        this.bindLoadLikedVideos();
+        this.bindLoadLikedWorks();
+        
+        // 3.5. 刷新收藏列表
+        this.bindLoadBookmarkedWorks();
 
         // 4. 点赞列表搜索
         this.bindLikedSearch();
 
+        // 4.5. ✅ 收藏列表搜索
+        this.bindBookmarkedSearch();
+
         // 5. 点赞列表分页
         this.bindLikedPagination();
+
+        // 5.5. ✅ 收藏列表分页
+        this.bindBookmarkedPagination();
 
         // 6. 作品卡片单个下载（事件委托）
         this.bindWorkCardActions();
@@ -44,8 +53,10 @@ class EventBinder {
 
         // 9. 关注列表批量操作（预留）
         this.bindFollowingBatchOperations();
+        
+        // 10. 日志区域折叠/展开
+        this.bindLogToggle();
 
-        logger.info('✅ DOM 事件绑定完成');
     }
 
     /**
@@ -57,9 +68,7 @@ class EventBinder {
             selectFolderBtn.addEventListener('click', () => {
                 this.app.handleSelectFolder();
             });
-            logger.info('✅ 已绑定: 选择文件夹按钮');
         } else {
-            logger.warn('⚠️ 未找到元素: selectFolder');
         }
     }
 
@@ -83,9 +92,7 @@ class EventBinder {
                 logToUI('info', '🔄 切换到关注列表');
                 this.app.tabManager.switchTab('following');
             });
-            logger.info('✅ 已绑定: 关注列表 Tab');
         } else {
-            logger.warn('⚠️ 未找到元素: tabFollowing');
         }
 
         if (tabLiked) {
@@ -94,9 +101,7 @@ class EventBinder {
                 logToUI('info', '🔄 切换到点赞列表');
                 this.app.tabManager.switchTab('liked');
             });
-            logger.info('✅ 已绑定: 点赞列表 Tab');
         } else {
-            logger.warn('⚠️ 未找到元素: tabLiked');
         }
 
         if (tabBookmarked) {
@@ -105,24 +110,60 @@ class EventBinder {
                 logToUI('info', '🔄 切换到收藏列表');
                 this.app.tabManager.switchTab('bookmarked');
             });
-            logger.info('✅ 已绑定: 收藏列表 Tab');
         } else {
-            logger.warn('⚠️ 未找到元素: tabBookmarked');
         }
     }
 
     /**
      * 绑定刷新点赞列表按钮
      */
-    bindLoadLikedVideos() {
+    bindLoadLikedWorks() {
         const loadLikedBtn = document.getElementById('loadLiked');
         if (loadLikedBtn) {
             loadLikedBtn.addEventListener('click', () => {
-                this.app.handleLoadLikedVideos();
+                this.app.handleLoadLikedWorks();
             });
-            logger.info('✅ 已绑定: 刷新点赞列表按钮');
         } else {
-            logger.warn('⚠️ 未找到元素: loadLiked');
+        }
+    }
+    
+    /**
+     * ✅ 绑定刷新收藏列表按钮
+     */
+    bindLoadBookmarkedWorks() {
+        const loadBookmarkedBtn = document.getElementById('loadBookmarked');
+        if (loadBookmarkedBtn) {
+            loadBookmarkedBtn.addEventListener('click', () => {
+                logger.info('📋 请求加载收藏夹列表...');
+                
+                // ✅ 禁用所有控制按钮（防止重复点击和误操作）
+                this.app.uiStateManager.disableAllControlButtons();
+                
+                // ✅ 禁用所有作品按钮
+                this.app.uiStateManager.disableAllWorkDownloadButtons();
+                
+                // 发送消息到 Content Script
+                window.parent.postMessage({
+                    source: 'sidebar',
+                    type: 'LOAD_COLLECTS_LIST'
+                }, '*');
+            });
+        } else {
+        }
+    }
+    
+    /**
+     * ✅ 绑定刷新关注列表按钮
+     */
+    bindLoadFollowingAuthors() {
+        const loadFollowingBtn = document.getElementById('loadFollowing');
+        if (loadFollowingBtn) {
+            loadFollowingBtn.addEventListener('click', () => {
+                logger.info('👥 请求加载关注列表...');
+                this.app.handleLoadFollowingAuthors();
+            });
+        } else {
+            logger.warn('⚠️ 未找到 loadFollowing 按钮元素');
         }
     }
 
@@ -132,149 +173,192 @@ class EventBinder {
     bindLikedSearch() {
         const likedSearchInput = document.getElementById('likedSearchInput');
         if (likedSearchInput) {
-            let searchTimer = null;
-            likedSearchInput.addEventListener('input', async (event) => {
-                clearTimeout(searchTimer);
-                searchTimer = setTimeout(async () => {
-                    this.app.likedManager.initElements();
-                    this.app.likedManager.search(event.target.value);
-
-                    // ✅ 重新查询下载状态并更新 allWorks
-                    await this.app.refreshDownloadStatus();
-
-                    // ✅ 获取当前页的选中状态，传递给 updateUI
-                    const currentPageItems = this.app.likedManager.getCurrentPageData();
-                    const selectedIds = currentPageItems
-                        .filter(work => this.app.batchSelectionManager.state.liked.selectedWorkIds.has(work.workId))
-                        .map(work => work.workId);
-                    logger.info(`🔍 搜索后同步 checkbox: 当前页 ${currentPageItems.length} 个作品, 选中 ${selectedIds.length} 个`);
-                    logger.info(`🔍 内存中的选中状态: ${this.app.batchSelectionManager.state.liked.selectedWorkIds.size} 个`);
-                    
-                    // ✅ 在渲染时直接传递选中状态，消除闪烁
-                    this.app.likedManager.updateUI(new Set(selectedIds));
-                }, 300);
-            });
-            logger.info('✅ 已绑定: 点赞列表搜索框');
-        } else {
-            logger.warn('⚠️ 未找到元素: likedSearchInput');
+            this._bindSearchInput(likedSearchInput, 'liked');
         }
     }
+    
+    /**
+     * ✅ 绑定收藏列表搜索框
+     */
+    bindBookmarkedSearch() {
+        const bookmarkedSearchInput = document.getElementById('bookmarkedSearchInput');
+        if (bookmarkedSearchInput) {
+            this._bindSearchInput(bookmarkedSearchInput, 'bookmarked');
+        }
+    }
+    
+    /**
+     * ✅ 通用搜索框绑定方法（支持点赞和收藏）
+     * @param {HTMLElement} searchInput - 搜索输入框元素
+     * @param {string} listType - 列表类型 ('liked' | 'bookmarked')
+     */
+    _bindSearchInput(searchInput, listType) {
+        let searchTimer = null;
+        searchInput.addEventListener('input', async (event) => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(async () => {
+                // ✅ 根据列表类型选择对应的 Manager
+                const manager = listType === 'liked' ? this.app.likedManager : this.app.bookmarkedManager;
+                    
+                manager.initElements();
+                manager.search(event.target.value);
+                
+                // ✅ 重新查询下载状态并更新 allWorks
+                await this.app.refreshListDownloadStatus(manager);
+    
+                // ✅ 获取当前页的选中状态，传递给 updateUI
+                const currentPageItems = manager.getCurrentPageData();
+                const selectedIds = currentPageItems
+                    .filter(work => this.app.batchSelectionManager.state[listType].selectedWorkIds.has(work.workId))
+                    .map(work => work.workId);
+                logger.info(`🔍 搜索后同步 checkbox: 当前页 ${currentPageItems.length} 个作品, 选中 ${selectedIds.length} 个`);
+                logger.info(`🔍 内存中的选中状态: ${this.app.batchSelectionManager.state[listType].selectedWorkIds.size} 个`);
+    
+                // ✅ 在渲染时直接传递选中状态，消除闪烁
+                manager.updateUI(new Set(selectedIds));
+            }, 300);
+        });
+    }
 
+    /**
+     * ✅ 通用分页按钮绑定方法
+     * @param {string} listType - 列表类型 ('liked' | 'bookmarked')
+     */
+    _bindPagination(listType) {
+        const prefix = listType === 'liked' ? 'liked' : 'bookmarked';
+        const prevBtn = document.getElementById(`${prefix}PrevPage`);
+        const nextBtn = document.getElementById(`${prefix}NextPage`);
+        const manager = listType === 'liked' ? this.app.likedManager : this.app.bookmarkedManager;
+    
+        if (prevBtn) {
+            prevBtn.addEventListener('click', async () => {
+                manager.initElements();
+                manager.prevPage();
+    
+                // ✅ 重新查询下载状态并更新 allWorks
+                await this.app.refreshListDownloadStatus(manager);
+    
+                // ✅ UI 日志
+                logToUI('info', `⬅️ 切换到第 ${manager.currentPage} 页`);
+    
+                // ✅ 获取当前页的选中状态，传递给 updateUI
+                const currentPageItems = manager.getCurrentPageData();
+                const selectedIds = currentPageItems
+                    .filter(work => this.app.batchSelectionManager.state[listType].selectedWorkIds.has(work.workId))
+                    .map(work => work.workId);
+                logger.info(`🔍 分页后同步 checkbox: 当前页 ${currentPageItems.length} 个作品, 选中 ${selectedIds.length} 个`);
+                logger.info(`🔍 内存中的选中状态: ${this.app.batchSelectionManager.state[listType].selectedWorkIds.size} 个`);
+    
+                // ✅ 在渲染时直接传递选中状态，消除闪烁
+                manager.updateUI(new Set(selectedIds));
+            });
+        }
+    
+        if (nextBtn) {
+            nextBtn.addEventListener('click', async () => {
+                manager.initElements();
+                manager.nextPage();
+    
+                // ✅ 重新查询下载状态并更新 allWorks
+                await this.app.refreshListDownloadStatus(manager);
+    
+                // ✅ UI 日志
+                logToUI('info', `➡️ 切换到第 ${manager.currentPage} 页`);
+    
+                // ✅ 获取当前页的选中状态，传递给 updateUI
+                const currentPageItems = manager.getCurrentPageData();
+                const selectedIds = currentPageItems
+                    .filter(work => this.app.batchSelectionManager.state[listType].selectedWorkIds.has(work.workId))
+                    .map(work => work.workId);
+                logger.info(`🔍 分页后同步 checkbox: 当前页 ${currentPageItems.length} 个作品, 选中 ${selectedIds.length} 个`);
+                logger.info(`🔍 内存中的选中状态: ${this.app.batchSelectionManager.state[listType].selectedWorkIds.size} 个`);
+    
+                // ✅ 在渲染时直接传递选中状态，消除闪烁
+                manager.updateUI(new Set(selectedIds));
+            });
+        }
+    }
+    
     /**
      * 绑定点赞列表分页按钮
      */
     bindLikedPagination() {
-        const likedPrevBtn = document.getElementById('likedPrevPage');
-        const likedNextBtn = document.getElementById('likedNextPage');
-
-        if (likedPrevBtn) {
-            likedPrevBtn.addEventListener('click', async () => {
-                this.app.likedManager.initElements();
-                this.app.likedManager.prevPage();
-
-                // ✅ 重新查询下载状态并更新 allWorks
-                await this.app.refreshDownloadStatus();
-
-                // ✅ UI 日志
-                logToUI('info', `⬅️ 切换到第 ${this.app.likedManager.currentPage} 页`);
-
-                // ✅ 获取当前页的选中状态，传递给 updateUI
-                const currentPageItems = this.app.likedManager.getCurrentPageData();
-                const selectedIds = currentPageItems
-                    .filter(work => this.app.batchSelectionManager.state.liked.selectedWorkIds.has(work.workId))
-                    .map(work => work.workId);
-                logger.info(`🔍 分页后同步 checkbox: 当前页 ${currentPageItems.length} 个作品, 选中 ${selectedIds.length} 个`);
-                logger.info(`🔍 内存中的选中状态: ${this.app.batchSelectionManager.state.liked.selectedWorkIds.size} 个`);
-                
-                // ✅ 在渲染时直接传递选中状态，消除闪烁
-                this.app.likedManager.updateUI(new Set(selectedIds));
-            });
-            logger.info('✅ 已绑定: 点赞列表上一页按钮');
-        } else {
-            logger.warn('⚠️ 未找到元素: likedPrevPage');
-        }
-
-        if (likedNextBtn) {
-            likedNextBtn.addEventListener('click', async () => {
-                this.app.likedManager.initElements();
-                this.app.likedManager.nextPage();
-
-                // ✅ 重新查询下载状态并更新 allWorks
-                await this.app.refreshDownloadStatus();
-
-                // ✅ UI 日志
-                logToUI('info', `➡️ 切换到第 ${this.app.likedManager.currentPage} 页`);
-
-                // ✅ 获取当前页的选中状态，传递给 updateUI
-                const currentPageItems = this.app.likedManager.getCurrentPageData();
-                const selectedIds = currentPageItems
-                    .filter(work => this.app.batchSelectionManager.state.liked.selectedWorkIds.has(work.workId))
-                    .map(work => work.workId);
-                logger.info(`🔍 分页后同步 checkbox: 当前页 ${currentPageItems.length} 个作品, 选中 ${selectedIds.length} 个`);
-                logger.info(`🔍 内存中的选中状态: ${this.app.batchSelectionManager.state.liked.selectedWorkIds.size} 个`);
-                
-                // ✅ 在渲染时直接传递选中状态，消除闪烁
-                this.app.likedManager.updateUI(new Set(selectedIds));
-            });
-            logger.info('✅ 已绑定: 点赞列表下一页按钮');
-        } else {
-            logger.warn('⚠️ 未找到元素: likedNextPage');
-        }
+        this._bindPagination('liked');
+    }
+    
+    /**
+     * ✅ 绑定收藏列表分页按钮
+     */
+    bindBookmarkedPagination() {
+        this._bindPagination('bookmarked');
     }
 
     /**
      * 绑定作品卡片操作（事件委托）
      */
     bindWorkCardActions() {
+        // ✅ 点赞列表
         const likedList = document.getElementById('likedList');
         if (likedList) {
-            likedList.addEventListener('click', (event) => {
-                // ✅ 优先级 1: 检查是否点击了下载按钮
-                const downloadBtn = event.target.closest('.download-btn');
-                if (downloadBtn && !downloadBtn.disabled) {
-                    const workId = downloadBtn.dataset.workId;
-                    logger.info(`👆 点击了下载按钮: ${workId}`);
-                    this.app.handleSingleWorkDownload(workId);
-                    return;  // ✅ 阻止后续处理
-                }
-
-                // ✅ 优先级 2: 检查是否点击了跳转链接
-                const jumpBtn = event.target.closest('.jump-btn');
-                if (jumpBtn) {
-                    // a 标签默认行为即可，不需要额外处理
-                    return;  // ✅ 阻止后续处理
-                }
-
-                // ✅ 优先级 3: 检查是否点击了复选框
-                const checkbox = event.target.closest('.work-checkbox');
-                if (checkbox) {
-                    const workId = checkbox.dataset.workId;
-                    logger.info(`☑️ 复选框状态变化: ${workId}, checked=${checkbox.checked}`);
-                    this.app.batchSelectionManager.handleCheckboxChange('liked', workId, checkbox.checked);
-                    return;  // ✅ 阻止后续处理
-                }
-
-                // ✅ 优先级 4: 点击卡片任意位置，切换复选框状态
-                const workItem = event.target.closest('.work-item');
-                if (workItem) {
-                    const workId = workItem.dataset.workId;
-                    const cardCheckbox = workItem.querySelector('.work-checkbox');
-
-                    if (cardCheckbox && !cardCheckbox.disabled) {
-                        // 切换复选框状态
-                        cardCheckbox.checked = !cardCheckbox.checked;
-
-                        // 触发 change 事件（手动）
-                        logger.info(`☑️ 点击卡片切换复选框: ${workId}, checked=${cardCheckbox.checked}`);
-                        this.app.batchSelectionManager.handleCheckboxChange('liked', workId, cardCheckbox.checked);
-                    }
-                    return;  // ✅ 阻止后续处理
-                }
-            });
-            logger.info('✅ 已绑定: 作品卡片下载、跳转、复选框和卡片点击（事件委托）');
-        } else {
-            logger.warn('⚠️ 未找到元素: likedList');
+            this._bindListEvents(likedList, 'liked');
         }
+            
+        // ✅ 收藏列表
+        const bookmarkedList = document.getElementById('bookmarkedList');
+        if (bookmarkedList) {
+            this._bindListEvents(bookmarkedList, 'bookmarked');
+        }
+    }
+        
+    /**
+     * ✅ 绑定单个列表的事件（通用方法）
+     * @param {HTMLElement} listElement - 列表容器
+     * @param {string} listType - 列表类型 ('liked' | 'bookmarked')
+     */
+    _bindListEvents(listElement, listType) {
+        listElement.addEventListener('click', (event) => {
+            // ✅ 优先级 1: 检查是否点击下载按钮
+            const downloadBtn = event.target.closest('.download-btn');
+            if (downloadBtn && !downloadBtn.disabled) {
+                const workId = downloadBtn.dataset.workId;
+                logger.info(`👆 点击了下载按钮: ${workId}`);
+                this.app.handleSingleWorkDownload(workId);
+                return;  // ✅ 阻止后续处理
+            }
+    
+            // ✅ 优先级 2: 检查是否点击跳转链接
+            const jumpBtn = event.target.closest('.jump-btn');
+            if (jumpBtn) {
+                // a 标签默认行为即可，不需要额外处理
+                return;  // ✅ 阻止后续处理
+            }
+    
+            // ✅ 优先级 3: 检查是否点击复选框
+            const checkbox = event.target.closest('.work-checkbox');
+            if (checkbox) {
+                const workId = checkbox.dataset.workId;
+                logger.info(`☑️ 复选框状态变化: ${workId}, checked=${checkbox.checked}`);
+                this.app.batchSelectionManager.handleCheckboxChange(listType, workId, checkbox.checked);
+                return;  // ✅ 阻止后续处理
+            }
+    
+            // ✅ 优先级 4: 点击卡片任意位置，切换复选框状态
+            const workItem = event.target.closest('.work-item');
+            if (workItem) {
+                const workId = workItem.dataset.workId;
+                const cardCheckbox = workItem.querySelector('.work-checkbox');
+    
+                if (cardCheckbox && !cardCheckbox.disabled) {
+                    // 切换复选框状态
+                    cardCheckbox.checked = !cardCheckbox.checked;
+    
+                    // 触发 change 事件（手动）
+                    logger.info(`☑️ 点击卡片切换复选框: ${workId}, checked=${cardCheckbox.checked}`);
+                    this.app.batchSelectionManager.handleCheckboxChange(listType, workId, cardCheckbox.checked);
+                }
+                return;  // ✅ 阻止后续处理
+            }
+        });
     }
 
     /**
@@ -289,21 +373,18 @@ class EventBinder {
             likedBatchSelect.addEventListener('change', (event) => {
                 this.app.handleBatchSelectionChange('liked', event.target.value);
             });
-            logger.info('✅ 已绑定: 点赞列表批量选择下拉框');
         }
 
         if (likedBatchDownloadBtn) {
             likedBatchDownloadBtn.addEventListener('click', () => {
                 this.app.handleBatchDownload('liked');
             });
-            logger.info('✅ 已绑定: 点赞列表批量下载按钮');
         }
 
         if (likedStopDownloadBtn) {
             likedStopDownloadBtn.addEventListener('click', () => {
                 this.app.handleStopDownload('liked');
             });
-            logger.info('✅ 已绑定: 点赞列表停止下载按钮');
         }
     }
 
@@ -319,21 +400,18 @@ class EventBinder {
             bookmarkedBatchSelect.addEventListener('change', (event) => {
                 this.app.handleBatchSelectionChange('bookmarked', event.target.value);
             });
-            logger.info('✅ 已绑定: 收藏列表批量选择下拉框');
         }
 
         if (bookmarkedBatchDownloadBtn) {
             bookmarkedBatchDownloadBtn.addEventListener('click', () => {
                 this.app.handleBatchDownload('bookmarked');
             });
-            logger.info('✅ 已绑定: 收藏列表批量下载按钮');
         }
 
         if (bookmarkedStopDownloadBtn) {
             bookmarkedStopDownloadBtn.addEventListener('click', () => {
                 this.app.handleStopDownload('bookmarked');
             });
-            logger.info('✅ 已绑定: 收藏列表停止下载按钮');
         }
     }
 
@@ -349,21 +427,49 @@ class EventBinder {
             followingBatchSelect.addEventListener('change', (event) => {
                 this.app.handleBatchSelectionChange('following', event.target.value);
             });
-            logger.info('✅ 已绑定: 关注列表批量选择下拉框');
         }
 
         if (followingBatchDownloadBtn) {
             followingBatchDownloadBtn.addEventListener('click', () => {
                 this.app.handleBatchDownload('following');
             });
-            logger.info('✅ 已绑定: 关注列表批量下载按钮');
         }
 
         if (followingStopDownloadBtn) {
             followingStopDownloadBtn.addEventListener('click', () => {
                 this.app.handleStopDownload('following');
             });
-            logger.info('✅ 已绑定: 关注列表停止下载按钮');
+        }
+    }
+    
+    /**
+     * ✅ 绑定日志区域折叠/展开按钮
+     */
+    bindLogToggle() {
+        const toggleLogBtn = document.getElementById('toggleLogBtn');
+        const logHeader = document.getElementById('logHeader');
+        const logSection = document.getElementById('logSection');
+        
+        if (toggleLogBtn && logHeader && logSection) {
+            // 点击按钮或标题都可以折叠/展开
+            const toggleLog = () => {
+                logSection.classList.toggle('collapsed');
+                const isCollapsed = logSection.classList.contains('collapsed');
+                
+                // 更新按钮图标
+                toggleLogBtn.textContent = isCollapsed ? '▲' : '▼';
+                
+                logger.info(`📝 日志区域${isCollapsed ? '向下收起' : '展开'}`);
+            };
+            
+            toggleLogBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // 防止触发标题的点击事件
+                toggleLog();
+            });
+            
+            logHeader.addEventListener('click', toggleLog);
+            
+        } else {
         }
     }
 }
