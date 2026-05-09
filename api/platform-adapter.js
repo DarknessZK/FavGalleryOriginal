@@ -5,6 +5,9 @@
 
 import { CONFIG } from '../config/constants.js';
 import { DouyinAPI } from './douyin/api.js';
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('PlatformAdapter');
 
 /**
  * 平台适配器类
@@ -18,7 +21,7 @@ class PlatformAdapter {
         /** 当前平台的 API 实例 */
         this.api = this.createAPI(this.currentPlatform);
 
-        console.log(`[PlatformAdapter] 初始化完成，当前平台: ${this.currentPlatform}`);
+        logger.info(`初始化完成，当前平台: ${this.currentPlatform}`);
     }
 
     /**
@@ -64,11 +67,11 @@ class PlatformAdapter {
 
         // 如果已经是当前平台，无需切换
         if (this.currentPlatform === platform) {
-            console.log('[PlatformAdapter] 已是当前平台，无需切换');
+            logger.info('已是当前平台，无需切换');
             return;
         }
 
-        console.log(`[PlatformAdapter] 切换平台: ${this.currentPlatform} -> ${platform}`);
+        logger.info(`切换平台: ${this.currentPlatform} -> ${platform}`);
 
         // 保存旧平台
         const oldPlatform = this.currentPlatform;
@@ -90,7 +93,7 @@ class PlatformAdapter {
             }
         }));
 
-        console.log(`[PlatformAdapter] 平台切换成功: ${platform}`);
+        logger.info(`平台切换成功: ${platform}`);
     }
 
     /**

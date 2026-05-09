@@ -99,3 +99,76 @@ export async function loadAuthorsBase(fileSystem) {
     }
 }
 
+/**
+ * 查询作者下载状态
+ *
+ * @param {Object} fileSystem - FileSystem 实例
+ * @param {string} uid - 作者ID
+ * @returns {Promise<Object|null>} 作者下载状态 { downloadStatus, downloadedCount, totalCount }
+ */
+export async function getAuthorDownloadStatus(fileSystem, uid) {
+    try {
+        await fileSystem.initDatabase();
+        
+        const author = await database.get('authors', uid);
+        if (!author) {
+            logger.debug(`ℹ️ 作者不存在: ${uid}`);
+            return null;
+        }
+        
+        const status = {
+            downloadStatus: author.downloadStatus || 'pending',
+            downloadedCount: author.downloadedCount || 0,
+            totalCount: author.totalCount || 0,
+            lastDownloadTime: author.lastDownloadTime || null
+        };
+        
+        logger.debug(`✅ 查询作者状态: ${uid}`, status);
+        return status;
+    } catch (error) {
+        logger.error('❌ 查询作者状态失败:', error);
+        return null;
+    }
+}
+
+/**
+ * 更新作者下载状态（保存到 IndexedDB + 异步备份到文件系统）
+ *
+ * @param {Object} fileSystem - FileSystem 实例
+ * @param {Object} backupManager - BackupManager 实例
+ * @param {string} uid - 作者ID
+ * @param {string} status - 下载状态 'pending' | 'partial' | 'completed'
+ * @param {number} downloadedCount - 已下载数量
+ * @param {number} totalCount - 总数量
+ */
+export async function updateAuthorDownloadStatus(fileSystem, backupManager, uid, status, downloadedCount, totalCount) {
+    try {
+        await fileSystem.initDatabase();
+        
+        // 获取现有作者数据
+        const author = await database.get('authors', uid);
+        if (!author) {
+            logger.warn(`⚠️ 作者不存在，无法更新状态: ${uid}`);
+            return;
+        }
+        
+        // 更新状态字段
+        author.downloadStatus = status;
+        author.downloadedCount = downloadedCount;
+        author.totalCount = totalCount;
+        author.lastDownloadTime = Date.now();
+        
+        // 保存到 IndexedDB
+        await database.save('authors', author);
+        logger.info(`✅ 已更新作者下载状态: ${uid} -> ${status} (${downloadedCount}/${totalCount})`);
+        
+        // ✅ 异步备份到文件系统（符合增量备份规则）
+        backupManager.performSelectiveBackup(['authors']).catch(error => {
+            logger.warn('⚠️ 作者状态备份失败:', error.message);
+        });
+    } catch (error) {
+        logger.error('❌ 更新作者下载状态失败:', error);
+        throw error;
+    }
+}
+

@@ -26,6 +26,9 @@ class FileLogger {
         this.sidebarLogQueue = [];
         this.sidebarFlushTimer = null;
         this.SIDEBAR_FLUSH_INTERVAL = 3000; // 每 3 秒刷新一次
+        
+        // ✅ 文件夹选择状态（Sidebar 环境）
+        this.folderSelected = false;
     }
 
     /**
@@ -185,19 +188,40 @@ class FileLogger {
     }
 
     /**
-     * 写入日志到队列（异步批量写入）
+     * ✅ 设置文件夹选择状态（Sidebar 调用）
      */
-    async writeToFile(level, module, message) {
+    setFolderSelected(selected) {
+        this.folderSelected = selected;
+    }
+
+    /**
+     * 写入日志到队列（异步批量写入）
+     * @param {string} level - 日志级别
+     * @param {string} module - 模块名
+     * @param {string} message - 日志消息
+     * @param {boolean} fromSidebar - 是否来自 Sidebar（true 则只写文件，不输出控制台）
+     */
+    async writeToFile(level, module, message, fromSidebar = false) {
         try {
             // ✅ 检测是否在 Sidebar 环境
             const isSidebar = !this.fileManager || !this.fileManager.rootDirectoryHandle;
             
             if (isSidebar) {
-                // Sidebar 环境：加入缓冲队列，批量发送给 Content Script
+                // ✅ 如果未选择文件夹，只输出到控制台，不发送消息
+                if (!this.folderSelected) {
+                    // 只输出到控制台，不加入队列
+                    const timestamp = new Date().toLocaleTimeString('zh-CN');
+                    console.log(`[${timestamp}] [${module}] ${message}`);
+                    return;
+                }
+                
+                // Sidebar 环境且已选择文件夹：加入缓冲队列，批量发送给 Content Script
                 this.sidebarLogQueue.push({ level, module, message, timestamp: Date.now() });
                 
-                // 启动定时刷新（如果还没启动）
-                this.startSidebarFlushTimer();
+                // ✅ 只在定时器未启动时才启动（避免每次写入都重启定时器）
+                if (!this.sidebarFlushTimer) {
+                    this.startSidebarFlushTimer();
+                }
                 
                 // 如果队列太长，立即刷新
                 if (this.sidebarLogQueue.length > 100) {
@@ -212,6 +236,12 @@ class FileLogger {
             }
 
             const formattedMessage = this.formatMessage(level, module, message);
+            
+            // ✅ 只有非 Sidebar 发来的日志才输出到控制台
+            if (!fromSidebar) {
+                const timestamp = new Date().toLocaleTimeString('zh-CN');
+                console.log(`[${timestamp}] [${module}] ${message}`);
+            }
             
             // 加入队列，由定时器批量写入
             this.logQueue.push(formattedMessage);
@@ -229,7 +259,8 @@ class FileLogger {
      * 启动 Sidebar 日志定时刷新
      */
     startSidebarFlushTimer() {
-        if (this.sidebarFlushTimer) return;
+        // ✅ 先停止旧定时器（防止重复创建）
+        this.stopSidebarFlushTimer();
         
         this.sidebarFlushTimer = setInterval(() => {
             this.flushSidebarLogs();
@@ -243,8 +274,8 @@ class FileLogger {
         if (this.sidebarFlushTimer) {
             clearInterval(this.sidebarFlushTimer);
             this.sidebarFlushTimer = null;
-            // 刷新剩余日志
-            this.flushSidebarLogs();
+            // ✅ 不立即刷新，避免循环触发
+            // this.flushSidebarLogs();
         }
     }
     

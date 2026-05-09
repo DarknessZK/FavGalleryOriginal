@@ -1,0 +1,23 @@
+# FavGallery 代码所有者
+# 此文件定义哪些人负责审查特定目录的代码变更
+
+# 所有代码变更默认需要核心开发者审查
+* @FavGallery/core-team
+
+# 架构和核心业务逻辑
+/core/ @FavGallery/architect
+/api/ @FavGallery/architect
+
+# 数据层和备份系统
+/data/ @FavGallery/data-lead
+
+# UI 组件
+/ui/ @FavGallery/ui-lead
+
+# 配置文件
+/config/ @FavGallery/core-team
+manifest.json @FavGallery/core-team
+
+# 文档
+/docs/DEVELOPMENT_RULES.md @FavGallery/core-team
+/docs/ARCHITECTURE.md @FavGallery/architect

@@ -310,7 +310,7 @@ export function normalizeAuthorData(rawData, options = {}) {
         avatarUrl,
         followerCount: rawData[mapping.followerCount] || rawData[mapping.followerCount.replace('_', '')] || 0,
         followingCount: rawData[mapping.followingCount] || rawData[mapping.followingCount.replace('_', '')] || 0,
-        workCount: rawData[mapping.workCount] || rawData[mapping.workCount.replace('work', 'aweme').replace('_', '')] || 0,  // ✅ 改为 workCount
+        workCount: rawData[mapping.workCount] || 0,  // ✅ 直接读取 aweme_count
         isDeleted: false  // ✅ 默认未删除
     };
 }

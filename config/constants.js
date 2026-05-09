@@ -60,11 +60,11 @@ export const CONFIG = {
             
             // 视频相关
             VIDEO_DETAIL: 'https://www.douyin.com/aweme/v1/web/aweme/detail/',
-            AUTHOR_VIDEOS: 'https://www.douyin.com/aweme/v1/web/aweme/post/',
+            AUTHOR_WORKS: 'https://www.douyin.com/aweme/v1/web/aweme/post/',
             
             // 收藏夹相关
             COLLECTS_LIST: 'https://www-hj.douyin.com/aweme/v1/web/collects/list/',
-            COLLECTS_VIDEOS: 'https://www-hj.douyin.com/aweme/v1/web/collects/video/list/'
+            COLLECTS_WORKS: 'https://www-hj.douyin.com/aweme/v1/web/collects/video/list/'
         }
         
         // 未来扩展示例：

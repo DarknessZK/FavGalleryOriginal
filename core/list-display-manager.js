@@ -287,6 +287,90 @@ class ListDisplayManager {
             bookmarkedManager.elements.list.innerHTML = '';
         }
     }
+    
+    /**
+     * ✅ 处理加载关注作者列表请求
+     */
+    handleLoadFollowingAuthors() {
+        logger.info('🔄 开始加载关注列表...');
+    
+        // 检查是否已选择文件夹
+        if (!this.app.folderSelected) {
+            logger.error('❌ 请先选择文件夹');
+            alert('请先点击“选择文件夹”按钮');
+            return;
+        }
+    
+        // ✅ 禁用所有控制按钮（防止重复点击和误操作）
+        this.app.uiStateManager.disableAllControlButtons();
+            
+        // ✅ 禁用所有作品按钮
+        this.app.uiStateManager.disableAllWorkDownloadButtons();
+    
+        // 设置加载状态
+        this.app.isLoading = true;
+    
+        // 发送消息到 Content Script
+        window.parent.postMessage({
+            source: 'sidebar',
+            type: 'LOAD_FOLLOWING_AUTHORS',
+            maxCount: CONFIG.FETCH_CONFIG.LIST_DEFAULTS.FOLLOWING
+        }, '*');
+    }
+    
+    /**
+     * ✅ 处理关注作者列表加载完成
+     */
+    async handleFollowingAuthorsLoaded(authors, total, followingManager) {
+        logger.info(`✅ 收到关注列表数据: ${total} 个作者`);
+
+        // ✅ UI 日志
+        logToUI('info', `✅ 加载完成: 共 ${total} 个作者`);
+
+        // 设置数据到管理器
+        followingManager.setData(authors);
+
+        // 初始化 DOM 元素
+        followingManager.initElements();
+        
+        // ✅ 渲染列表
+        followingManager.updateUI();
+        
+        // ✅ 标记列表区域有数据，扩展到300px
+        const listSection = document.querySelector('.container > .section:nth-child(4)');
+        if (listSection && authors.length > 0) {
+            listSection.classList.add('has-data');
+            logger.info('✅ 列表区域已标记为 has-data，扩展到300px');
+        }
+
+        // ✅ 恢复所有控制按钮
+        this.app.uiStateManager.enableAllControlButtons();
+        
+        // ✅ 恢复作品按钮（pending/failed/error 状态变为可用）
+        this.app.uiStateManager.enableAllWorkDownloadButtons();
+
+        // 重置加载状态
+        this.app.isLoading = false;
+
+        logger.info('✅ 关注列表渲染完成');
+    }
+    
+    /**
+     * ✅ 处理关注作者列表加载进度
+     */
+    handleFollowingAuthorsProgress(currentCount, totalCount, followingManager) {
+        logger.info(`📈 关注列表加载进度: ${currentCount}/${totalCount}`);
+        
+        // ✅ UI 日志
+        logToUI('info', `📈 加载进度: ${currentCount}/${totalCount}`);
+    }
+    
+    /**
+     * ✅ 处理关注作者列表加载错误
+     */
+    handleFollowingAuthorsError(error, followingManager) {
+        this.handleListError(error, followingManager);
+    }
 
     /**
      * 处理加载数据开始

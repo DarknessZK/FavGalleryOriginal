@@ -89,6 +89,8 @@
         "core/event-binder.js",
         "core/list-display-manager.js",
         "core/batch-selection-manager.js",
+        "core/download-handler.js",
+        "core/author-download-manager.js",
         "ui/components/tab-manager.js",
         "ui/components/multi-tag-selector.js",
         "ui/ui-state-manager.js"

@@ -53,12 +53,20 @@ export async function smartIncrementalFetch(
 
     while (hasMore && allData.length < maxCount) {
         try {
+            logger.debug(`🔄 开始第 ${allData.length / 20 + 1} 批获取，cursor=${cursor}`);
+            
             const result = await fetchFn(cursor);
 
             if (!result || !result.data) {
                 logger.warn('⚠️ 获取数据为空');
                 break;
             }
+            
+            logger.debug(`✅ 第 ${allData.length / 20 + 1} 批获取成功:`, {
+                batch_size: result.data.length,
+                hasMore: result.hasMore,
+                cursor: result.cursor
+            });
 
             // ✅ 去重逻辑：过滤掉已存在的 ID
             let newData = result.data;

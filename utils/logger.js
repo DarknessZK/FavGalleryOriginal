@@ -18,7 +18,6 @@ class Logger {
      * 信息日志
      */
     info(...args) {
-        console.log(`[${this.module}]`, ...args);
         fileLogger.writeToFile('INFO', this.module, args.join(' '));
     }
 
@@ -26,7 +25,6 @@ class Logger {
      * 调试日志
      */
     debug(...args) {
-        console.debug(`[${this.module}]`, ...args);
         fileLogger.writeToFile('DEBUG', this.module, args.join(' '));
     }
 
@@ -34,7 +32,6 @@ class Logger {
      * 警告日志
      */
     warn(...args) {
-        console.warn(`[${this.module}]`, ...args);
         fileLogger.writeToFile('WARN', this.module, args.join(' '));
     }
 
@@ -42,7 +39,6 @@ class Logger {
      * 错误日志
      */
     error(...args) {
-        console.error(`[${this.module}]`, ...args);
         fileLogger.writeToFile('ERROR', this.module, args.join(' '));
     }
 }

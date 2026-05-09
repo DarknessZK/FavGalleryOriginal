@@ -70,7 +70,7 @@ export class DouyinAPI {
     cleanup() {
         this.webId = null;
         this.userInfo = null;
-        console.log('[DouyinAPI] 状态已清理');
+        logger.info('状态已清理');
     }
 
     /**
@@ -98,9 +98,9 @@ export class DouyinAPI {
         if (!this.webId) {
             this.webId = getDouyinWebId();
             if (this.webId) {
-                console.log('[DouyinAPI] ✅ WebID 已获取:', this.webId);
+                logger.info('✅ WebID 已获取:', this.webId);
             } else {
-                console.warn('[DouyinAPI] ⚠️ 未能获取 WebID');
+                logger.warn('⚠️ 未能获取 WebID');
             }
         }
         return this.webId;
@@ -171,13 +171,13 @@ export class DouyinAPI {
                 return await requestFn();
             } catch (error) {
                 lastError = error;
-                console.warn(`[DouyinAPI] ⚠️ 请求失败 (第${attempt}/${maxRetries}次):`, error.message);
+                logger.warn(`⚠️ 请求失败 (第${attempt}/${maxRetries}次):`, error.message);
 
                 // 如果不是最后一次尝试，等待后重试
                 if (attempt < maxRetries) {
                     const retryDelay = DOUYIN_CONFIG.RETRY_CONFIG.baseDelay *
                         Math.pow(DOUYIN_CONFIG.RETRY_CONFIG.backoffMultiplier, attempt - 1);
-                    console.log(`[DouyinAPI] 🔄 ${retryDelay}ms 后重试...`);
+                    logger.info(`🔄 ${retryDelay}ms 后重试...`);
                     await delay(retryDelay);
                 }
             }
@@ -213,10 +213,10 @@ export class DouyinAPI {
         // 3. 验证并缓存
         if (userInfo && validateUserInfo(userInfo)) {
             this.userInfo = userInfo;
-            console.log('[DouyinAPI] ✅ 用户信息获取成功:', userInfo.nickname);
+            logger.info('✅ 用户信息获取成功:', userInfo.nickname);
             return userInfo;
         } else {
-            console.warn('[DouyinAPI] ❌ 未获取到有效的用户信息（可能未登录）');
+            logger.warn('❌ 未获取到有效的用户信息（可能未登录）');
             return null;
         }
     }
@@ -256,7 +256,7 @@ export class DouyinAPI {
 
             // 提取用户信息
             if (!data.user || !data.user.uid) {
-                console.warn('[DouyinAPI] API 返回的用户信息不完整');
+                logger.warn('API 返回的用户信息不完整');
                 return null;
             }
 
@@ -264,7 +264,7 @@ export class DouyinAPI {
             return normalizeAuthorData(data.user);
 
         } catch (error) {
-            console.error('[DouyinAPI] 从 API 获取用户信息失败:', error);
+            logger.error('从 API 获取用户信息失败:', error);
             return null;
         }
     }
@@ -292,6 +292,8 @@ export class DouyinAPI {
      * );
      */
     async getFollowingList(maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.FOLLOWING, onProgress = null, cachedUids = null, metadata = null) {  // ✅ 新增：metadata 参数
+        logger.info(`👥 [关注列表] 开始获取，目标数量: ${maxCount}`);
+        
         // 确保已获取用户信息
         await this.getCurrentUser();
 
@@ -300,6 +302,7 @@ export class DouyinAPI {
         }
 
         const cachedIds = cachedUids ? new Set(cachedUids) : null;
+        logger.debug(`📋 [关注列表] 缓存 ID 数量: ${cachedIds?.size || 0}`);
 
         // 定义批量获取函数
         let maxCursor = 0;
@@ -307,16 +310,23 @@ export class DouyinAPI {
         const fetchBatch = async (cursor) => {
             maxCursor = cursor || 0;
             
+            logger.debug(`🌐 [关注列表] 发起 API 请求，cursor: ${maxCursor}`);
+            
             const params = new URLSearchParams({
                 ...getDouyinDeviceParams(),
                 user_id: this.userInfo.uid,
-                sec_user_id: this.userInfo.platformId || '',  // ✅ 改为 platformId
+                sec_user_id: this.userInfo.platformId || '',
+                offset: '0',
                 count: '20',
-                max_cursor: maxCursor.toString(),
-                aid: '6383'
+                source_type: '1',
+                gps_access: '0',
+                address_book_access: '0',
+                is_top: '1',
+                max_time: maxCursor.toString()
             });
 
             const url = `${DOUYIN_CONFIG.API_ENDPOINTS.FOLLOWING_LIST}?${params}`;
+            logger.debug(`📤 [关注列表] 请求 URL: ${url.substring(0, 150)}...`);
 
             // 发送请求（带重试）
             const data = await this._requestWithRetry(async () => {
@@ -327,11 +337,11 @@ export class DouyinAPI {
                 return this._handleAPIResponse(response);
             });
 
-            // 更新游标（时间戳，用于获取更旧的作品）
-            // max_cursor 是这批作品中最旧的时间戳
-            // 下次请求传入此值，API 会返回比这个时间更早的作品
-            if (data.max_cursor !== undefined && data.max_cursor !== null) {
-                maxCursor = data.max_cursor;
+            logger.debug(`📥 [关注列表] API 响应接收: ${(data.followings || []).length} 条数据`);
+
+            // 更新游标（使用 min_time，参考旧项目实现）
+            if (data.min_time !== undefined && data.min_time !== null) {
+                maxCursor = data.min_time;
             }
 
             // 标准化用户数据
@@ -363,7 +373,13 @@ export class DouyinAPI {
 
             logger.info(`[关注列表] 获取 ${users.length} 个作者`);
 
-            return { users, hasMore: true, cursor: maxCursor, requestedCount: maxCount };  // ✅ 新增：添加 requestedCount
+            // ✅ 统一返回格式：使用 authors 字段（跨平台通用）
+            return { 
+                authors: users,  // ✅ 统一使用 authors 字段
+                hasMore: true, 
+                cursor: maxCursor, 
+                requestedCount: maxCount 
+            };
 
         } catch (error) {
             logger.error('获取关注列表失败:', error);
@@ -390,6 +406,8 @@ export class DouyinAPI {
      * );
      */
     async getLikedWorks(maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.LIKED, onProgress = null, cachedWorkIds = null, metadata = null) {  // ✅ 新增：metadata 参数
+        logger.info(`❤️ [点赞列表] 开始获取，目标数量: ${maxCount}`);
+        
         // 确保已获取用户信息
         await this.getCurrentUser();
 
@@ -398,12 +416,15 @@ export class DouyinAPI {
         }
 
         const cachedIds = cachedWorkIds ? new Set(cachedWorkIds) : null;  // ✅ 改为 cachedWorkIds
+        logger.debug(`📋 [点赞列表] 缓存 ID 数量: ${cachedIds?.size || 0}`);
 
         // 定义批量获取函数
         let maxCursor = 0;
         
         const fetchBatch = async (cursor) => {
             maxCursor = cursor || 0;
+            
+            logger.debug(`🌐 [点赞列表] 发起 API 请求，cursor: ${maxCursor}`);
             
             const params = new URLSearchParams({
                 ...getDouyinDeviceParams(),
@@ -415,6 +436,7 @@ export class DouyinAPI {
             });
 
             const url = `${DOUYIN_CONFIG.API_ENDPOINTS.LIKED_WORKS}?${params}`;
+            logger.debug(`📤 [点赞列表] 请求 URL: ${url.substring(0, 150)}...`);
 
             // 发送请求（带重试）
             const data = await this._requestWithRetry(async () => {
@@ -424,6 +446,8 @@ export class DouyinAPI {
                 });
                 return this._handleAPIResponse(response);
             });
+
+            logger.debug(`📥 [点赞列表] API 响应接收: ${(data.aweme_list || []).length} 条数据`);
 
             // 更新游标（时间戳，用于获取更旧的作品）
             // max_cursor 是这批作品中最旧的时间戳
@@ -490,6 +514,8 @@ export class DouyinAPI {
      * );
      */
     async getBookmarkedWorks(maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.BOOKMARKED, onProgress = null, cachedWorkIds = null, metadata = null) {  // ✅ 新增：metadata 参数
+        logger.info(`⭐ [收藏列表] 开始获取，目标数量: ${maxCount}`);
+        
         // 确保已获取用户信息
         await this.getCurrentUser();
 
@@ -498,12 +524,15 @@ export class DouyinAPI {
         }
 
         const cachedIds = cachedWorkIds ? new Set(cachedWorkIds) : null;  // ✅ 改为 cachedWorkIds
+        logger.debug(`📋 [收藏列表] 缓存 ID 数量: ${cachedIds?.size || 0}`);
 
         // 定义批量获取函数
         let maxCursor = 0;
         
         const fetchBatch = async (cursor) => {
             maxCursor = cursor || 0;
+            
+            logger.debug(`🌐 [收藏列表] 发起 API 请求，cursor: ${maxCursor}`);
             
             const params = new URLSearchParams({
                 ...getDouyinDeviceParams(),
@@ -514,6 +543,7 @@ export class DouyinAPI {
             });
 
             const url = `${DOUYIN_CONFIG.API_ENDPOINTS.BOOKMARKED_WORKS}?${params}`;
+            logger.debug(`📤 [收藏列表] 请求 URL: ${url.substring(0, 150)}...`);
 
             // 发送请求（带重试）
             const data = await this._requestWithRetry(async () => {
@@ -523,6 +553,8 @@ export class DouyinAPI {
                 });
                 return this._handleAPIResponse(response);
             });
+
+            logger.debug(`📥 [收藏列表] API 响应接收: ${(data.aweme_list || []).length} 条数据`);
 
             // 更新游标（时间戳，用于获取更旧的作品）
             // max_cursor 是这批作品中最旧的时间戳
@@ -547,24 +579,31 @@ export class DouyinAPI {
         };
 
         // 使用通用智能增量获取函数
-        const works = await smartIncrementalFetch(  // ✅ 改为 works
-            fetchBatch,
-            cachedIds,
-            'workId',
-            maxCount,
-            onProgress,
-            {
-                delayMs: DOUYIN_CONFIG.REQUEST_DELAY.normal,
-                isFullyLoaded: metadata?.isFullyLoaded || false  // ✅ 新增：传递完整加载标记
-            }
-        );
+        try {
+            const works = await smartIncrementalFetch(  // ✅ 改为 works
+                fetchBatch,
+                cachedIds,
+                'workId',
+                maxCount,
+                onProgress,
+                {
+                    delayMs: DOUYIN_CONFIG.REQUEST_DELAY.normal,
+                    isFullyLoaded: metadata?.isFullyLoaded || false  // ✅ 新增：传递完整加载标记
+                }
+            );
 
-        return {
-            works,  // ✅ 改为 works
-            hasMore: true,
-            cursor: maxCursor,
-            requestedCount: maxCount  // ✅ 新增：添加 requestedCount
-        };
+            logger.info(`[收藏列表] 获取 ${works.length} 个作品`);
+
+            return {
+                works,  // ✅ 改为 works
+                hasMore: true,
+                cursor: maxCursor,
+                requestedCount: maxCount  // ✅ 新增：添加 requestedCount
+            };
+        } catch (error) {
+            logger.error('❌ [收藏列表] 获取失败:', error);
+            throw error;
+        }
     }
 
     // ==========================================
@@ -614,7 +653,7 @@ export class DouyinAPI {
                     ...getAuthorWorkDeviceParams()  // ✅ 改为 getAuthorWorkDeviceParams
                 });
 
-                const url = `${DOUYIN_CONFIG.API_ENDPOINTS.AUTHOR_VIDEOS}?${params}`;
+                const url = `${DOUYIN_CONFIG.API_ENDPOINTS.AUTHOR_WORKS}?${params}`;
 
                 // 发送请求
                 const response = await fetch(url, {
@@ -644,7 +683,7 @@ export class DouyinAPI {
                     onProgress(allVideos.length, maxCount);
                 }
 
-                console.log(`[DouyinAPI] 📊 已获取 ${allVideos.length} 个作品...`);
+                logger.info(`📊 已获取 ${allVideos.length} 个作品...`);
 
                 // 如果还有更多且未达到上限，继续获取
                 if (!hasMore || allVideos.length >= maxCount) {
@@ -656,10 +695,10 @@ export class DouyinAPI {
 
             } catch (error) {
                 retryCount++;
-                console.error(`[DouyinAPI] ❌ 获取作者作品失败 (第${retryCount}次):`, error.message);
+                logger.error(`❌ 获取作者作品失败 (第${retryCount}次):`, error.message);
 
                 if (retryCount >= maxRetries) {
-                    console.warn('[DouyinAPI] ⚠️ 达到最大重试次数，停止获取');
+                    logger.warn('⚠️ 达到最大重试次数，停止获取');
                     break;
                 }
 
@@ -699,7 +738,7 @@ export class DouyinAPI {
                     ...getAuthorWorkDeviceParams()  // ✅ 改为 getAuthorWorkDeviceParams
                 });
 
-                const url = `${DOUYIN_CONFIG.API_ENDPOINTS.AUTHOR_VIDEOS}?${params}`;
+                const url = `${DOUYIN_CONFIG.API_ENDPOINTS.AUTHOR_WORKS}?${params}`;
 
                 const response = await fetch(url, {
                     method: 'GET',
@@ -721,7 +760,7 @@ export class DouyinAPI {
                 allVideos.push(...videos);
                 retryCount = 0;
 
-                console.log(`[DouyinAPI] 📊 已获取 ${allVideos.length} 个作品...`);
+                logger.info(`📊 已获取 ${allVideos.length} 个作品...`);
 
                 if (!hasMore || allVideos.length >= maxCount) break;
 
@@ -729,10 +768,10 @@ export class DouyinAPI {
 
             } catch (error) {
                 retryCount++;
-                console.error(`[DouyinAPI] ❌ 获取作者作品失败 (第${retryCount}次):`, error.message);
+                logger.error(`❌ 获取作者作品失败 (第${retryCount}次):`, error.message);
 
                 if (retryCount >= maxRetries) {
-                    console.warn('[DouyinAPI] ⚠️ 达到最大重试次数，停止获取');
+                    logger.warn('⚠️ 达到最大重试次数，停止获取');
                     break;
                 }
 
@@ -763,6 +802,8 @@ export class DouyinAPI {
      * console.log(result.hasMore);  // 是否有更多
      */
     async getCollects(cursor = 0, count = 20) {
+        logger.info(`📁 [收藏夹列表] 开始获取，cursor: ${cursor}, count: ${count}`);
+        
         // 确保已获取用户信息
         await this.getCurrentUser();
 
@@ -772,6 +813,8 @@ export class DouyinAPI {
 
         try {
             // 构建请求参数
+            logger.debug(`🌐 [收藏夹列表] 发起 API 请求`);
+            
             const params = new URLSearchParams({
                 ...getDouyinDeviceParams(),
                 user_id: this.userInfo.uid,
@@ -781,6 +824,7 @@ export class DouyinAPI {
             });
 
             const url = `${DOUYIN_CONFIG.API_ENDPOINTS.COLLECTS_LIST}?${params}`;
+            logger.debug(`📤 [收藏夹列表] 请求 URL: ${url.substring(0, 150)}...`);
 
             // 发送请求（带重试）
             const data = await this._requestWithRetry(async () => {
@@ -790,6 +834,8 @@ export class DouyinAPI {
                 });
                 return this._handleAPIResponse(response);
             });
+
+            logger.debug(`📥 [收藏夹列表] API 响应接收: ${(data.collects_list || []).length} 条数据`);
 
             // 提取收藏夹列表（只保留文档定义的字段）
             const collects = (data.collects_list || []).map(collect => {
@@ -802,6 +848,8 @@ export class DouyinAPI {
                 };
             });
 
+            logger.info(`✅ [收藏夹列表] 获取 ${collects.length} 个收藏夹`);
+
             return {
                 collects,
                 hasMore: data.has_more === 1 || data.has_more === true,
@@ -810,7 +858,7 @@ export class DouyinAPI {
             };
 
         } catch (error) {
-            console.error('[DouyinAPI] 获取收藏夹列表失败:', error);
+            logger.error('❌ [收藏夹列表] 获取失败:', error);
             throw error;
         }
     }
@@ -844,7 +892,7 @@ export class DouyinAPI {
                 count: count.toString()
             });
 
-            const url = `${DOUYIN_CONFIG.API_ENDPOINTS.COLLECTS_VIDEOS}?${params}`;
+            const url = `${DOUYIN_CONFIG.API_ENDPOINTS.COLLECTS_WORKS}?${params}`;
 
             // 发送请求（带重试）
             const data = await this._requestWithRetry(async () => {
@@ -901,7 +949,7 @@ export class DouyinAPI {
                     count: '20'
                 });
                 
-                const url = `${DOUYIN_CONFIG.API_ENDPOINTS.COLLECTS_VIDEOS}?${params}`;
+                const url = `${DOUYIN_CONFIG.API_ENDPOINTS.COLLECTS_WORKS}?${params}`;
                 
                 const response = await fetch(url, {
                     credentials: 'include',

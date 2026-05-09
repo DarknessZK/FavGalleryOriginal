@@ -9,6 +9,26 @@ import { createLogger } from './logger.js';
 const logger = createLogger('WorkHelpers');
 
 /**
+ * 格式化数字（中文单位）
+ * @param {number} num - 要格式化的数字
+ * @returns {string} 格式化后的字符串
+ */
+function formatNumber(num) {
+    if (num === 0 || !num) return '0';
+    
+    if (num >= 100000000) {
+        // 大于等于1亿，显示为 X.X亿
+        return (num / 100000000).toFixed(1) + '亿';
+    } else if (num >= 10000) {
+        // 大于等于1万，显示为 X.X万
+        return (num / 10000).toFixed(1) + '万';
+    } else {
+        // 小于1万，直接显示
+        return num.toString();
+    }
+}
+
+/**
  * 生成作品卡片 HTML
  * @param {Object} work - 作品数据对象
  * @param {Set} selectedWorkIds - 选中的作品ID集合（可选）
@@ -134,17 +154,42 @@ export function renderWorkList(listEl, works, selectedWorkIds = null) {
 function createAuthorCardHTML(author) {
     const nickname = author.nickname || '未知作者';
     const uniqueId = author.uniqueId || author.shortId || '';
-    const avatarUrl = author.avatarThumb?.urlList?.[0] || author.avatarMedium?.urlList?.[0] || '';
+    // ✅ 直接使用 avatarUrl（已经是字符串）
+    const avatarUrl = author.avatarUrl || '';
     const uid = author.uid || '';
     const signature = author.signature || '暂无简介';
     
     // ✅ 统计数据
     const followerCount = author.followerCount || 0;
     const followingCount = author.followingCount || 0;
-    const awemeCount = author.awemeCount || 0;
+    const workCount = author.workCount || 0;  // ✅ 使用通用字段名 workCount
     
-    // ✅ 跳转链接
-    const authorUrl = uid ? `https://www.douyin.com/user/${uid}` : '';
+    // ✅ 跳转链接（使用 platformId/sec_uid）
+    const platformId = author.platformId || '';
+    const authorUrl = platformId ? `https://www.douyin.com/user/${platformId}` : '';
+    
+    // ✅ 下载状态（新增）
+    const downloadStatus = author.downloadStatus || 'pending';
+    const downloadedCount = author.downloadedCount || 0;
+    const totalCount = author.totalCount || 0;
+    
+    // ✅ 根据状态设置按钮样式和文本
+    let buttonText = '⬇️ 保存';
+    let buttonStyle = 'background: #1890ff; text-align: center;';
+    let buttonDisabled = false;
+    let buttonClass = 'download-btn';
+    
+    // ✅ 优先判断：如果没有作品，直接显示已保存
+    if (workCount === 0 || downloadStatus === 'completed') {
+        buttonText = '✅ 已保存';
+        buttonStyle = 'background: #52c41a; cursor: default; text-align: center;';
+        buttonDisabled = true;
+        buttonClass = 'download-btn completed';
+    } else if (downloadStatus === 'partial') {
+        buttonText = `⚠️ ${downloadedCount}/${totalCount}`;
+        buttonStyle = 'background: #faad14; text-align: center;';
+        buttonClass = 'download-btn partial';
+    }
 
     return `
         <div class="author-item" data-uid="${uid}" style="
@@ -158,7 +203,8 @@ function createAuthorCardHTML(author) {
             cursor: pointer;
         ">
             <input type="checkbox" class="author-checkbox" data-uid="${uid}" 
-                style="margin-right: 0; cursor: pointer;">
+                style="margin-right: 0; cursor: pointer;"
+                ${buttonDisabled ? 'disabled' : ''}>
             ${avatarUrl ? `
                 <img src="${avatarUrl}" style="width: 80px; height: 100px; object-fit: cover; border-radius: 4px;" />
             ` : `
@@ -177,9 +223,9 @@ function createAuthorCardHTML(author) {
                     ${escapeHtml(signature)}
                 </div>
                 <div style="font-size: 11px; color: #999;">
-                    👥 ${followerCount} 粉丝 | 
-                    👤 ${followingCount} 关注 | 
-                    🎬 ${awemeCount} 作品
+                    👥 ${formatNumber(followerCount)} 粉丝 | 
+                    👤 ${formatNumber(followingCount)} 关注 | 
+                    🎬 ${formatNumber(workCount)} 作品
                 </div>
                 <div style="margin-top: 8px; display: flex; gap: 4px; align-items: center;">
                     ${authorUrl ? `
@@ -199,20 +245,24 @@ function createAuthorCardHTML(author) {
                             box-sizing: border-box;
                         ">🔗 主页</a>
                     ` : ''}
-                    <button class="download-btn" data-uid="${uid}" style="
-                        padding: 4px 6px;
-                        width: 80px;
-                        background: #1890ff;
-                        color: white;
-                        border: none;
-                        border-radius: 4px;
-                        cursor: pointer;
-                        font-size: 12px;
-                        text-align: center;
-                        display: inline-block;
-                        white-space: nowrap;
-                        box-sizing: border-box;
-                    ">⬇️ 保存</button>
+                    <button class="${buttonClass}" data-uid="${uid}" 
+                        ${buttonDisabled ? 'disabled' : ''}
+                        style="
+                            padding: 4px 6px;
+                            width: 80px;
+                            ${buttonStyle}
+                            color: white;
+                            border: none;
+                            border-radius: 4px;
+                            cursor: ${buttonDisabled ? 'default' : 'pointer'};
+                            font-size: 12px;
+                            text-align: center;
+                            display: inline-block;
+                            white-space: nowrap;
+                            box-sizing: border-box;
+                            position: relative;
+                            overflow: hidden;
+                        ">${buttonText}</button>
                 </div>
             </div>
         </div>

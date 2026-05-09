@@ -204,7 +204,12 @@ class BatchSelectionManager {
         const state = this.state[listType];
         if (!state) return;
         
-        state.selectedWorkIds.clear();
+        // ✅ 根据列表类型清空对应的选中集合
+        if (listType === 'following') {
+            state.selectedAuthorIds.clear();
+        } else {
+            state.selectedWorkIds.clear();
+        }
         state.selectAll = false;
         
         this.syncCheckboxes(listType, []);
@@ -296,6 +301,27 @@ class BatchSelectionManager {
         } else {
             return state.selectedWorkIds.size;
         }
+    }
+
+    /**
+     * ✅ 获取选中的作品ID列表
+     * @param {string} listType - 列表类型：'liked' | 'bookmarked'
+     * @returns {Array} 作品ID数组
+     */
+    getSelectedWorkIds(listType) {
+        const state = this.state[listType];
+        if (!state) return [];
+        return Array.from(state.selectedWorkIds);
+    }
+
+    /**
+     * ✅ 获取选中的作者UID列表
+     * @returns {Array} 作者UID数组
+     */
+    getSelectedAuthorIds() {
+        const state = this.state.following;
+        if (!state) return [];
+        return Array.from(state.selectedAuthorIds);
     }
 
     /**

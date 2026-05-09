@@ -35,6 +35,9 @@ class ContentScript {
         
         logger.info('ContentScript 初始化', { sidebarUrl: this.sidebarUrl });
         
+        // ✅ 通知 FileLogger 已选择文件夹（Content Script 环境）
+        fileLogger.setFolderSelected(true);
+        
         // 注入侧边栏
         this.injectSidebar();
     }
@@ -143,7 +146,7 @@ class ContentScript {
         
         // iframe 加载完成后发送用户信息
         iframe.addEventListener('load', () => {
-            logger.info('Iframe 加载完成，准备发送用户信息...');
+            logger.debug('Iframe 加载完成，准备发送用户信息...');
             
             setTimeout(async () => {
                 await this.sendUserInfo(iframe);
@@ -190,33 +193,27 @@ class ContentScript {
     async handleMessage(event, iframe) {
         if (!event.data || event.data.source !== 'sidebar') return;
         
-        logger.info('[Main] 📨 收到消息:', event.data.type);
+        logger.debug('[Main] 📨 收到消息:', event.data.type);
         
         switch (event.data.type) {
             case 'GET_USER_INFO':
-                logger.info('收到获取用户信息请求');
+                logger.debug('收到获取用户信息请求');
                 await this.sendUserInfo(iframe);
                 break;
                 
             case 'SELECT_FOLDER':
-                logger.info('收到文件夹选择请求');
+                logger.debug('收到文件夹选择请求');
                 this.selectFolder(iframe);
                 break;
                 
             case 'LOAD_LIKED_WORKS':  // ✅ 改为 LOAD_LIKED_WORKS
-                logger.info('收到加载点赞列表请求');
+                logger.debug('收到加载点赞列表请求');
                 await this._handleLoadLikedWorks(iframe, event.data.maxCount);
                 break;
                 
             case 'LOAD_LIKED_FROM_CACHE':
-                logger.info('收到从缓存加载点赞列表请求');
+                logger.debug('收到从缓存加载点赞列表请求');
                 await this._handleLoadLikedFromCache(iframe);
-                break;
-            
-            // ✅ P0: 处理单个作品下载请求（只传 workId）
-            case 'DOWNLOAD_WORK_BY_ID':
-                logger.info(`📥 收到下载作品请求: ${event.data.workId}`);
-                this.handleDownloadWorkById(event.data, iframe);
                 break;
             
             // ✅ 处理批量下载请求
@@ -231,6 +228,12 @@ class ContentScript {
                 this.handleStopBatchDownload(event.data, iframe);
                 break;
             
+            // ✅ 处理作者作品下载请求（方案D）
+            case 'DOWNLOAD_AUTHOR_WORKS':
+                logger.info(`👤 收到作者作品下载请求: UID=${event.data.uid}`);
+                await this.handleDownloadAuthorWorks(event.data, iframe);
+                break;
+            
             // ✅ 处理数据库查询请求
             case 'GET_DOWNLOADED_WORK_IDS':
                 logger.info('📊 收到查询已下载作品 ID 请求');
@@ -243,6 +246,15 @@ class ContentScript {
                 await this._handleLoadCollectsList(iframe);
                 break;
             
+            // ✅ 处理加载关注作者列表请求
+            case 'LOAD_FOLLOWING_AUTHORS':
+                logger.info('👥 收到加载关注列表请求');
+                dataFetcher.setFolderSelected(true);
+                await dataFetcher._loadList('following', iframe, { 
+                    maxCount: event.data.maxCount || CONFIG.FETCH_CONFIG.LIST_DEFAULTS.FOLLOWING 
+                });
+                break;
+            
             // ✅ 处理加载收藏夹作品请求
             case 'LOAD_COLLECT_WORKS':
                 logger.info(`🎬 收到加载收藏夹作品请求: ${event.data.collectIds.length} 个收藏夹`);
@@ -253,8 +265,20 @@ class ContentScript {
             case 'SIDEBAR_LOG_BATCH':
                 const logs = event.data.data; // 数组 [{level, module, message, timestamp}, ...]
                 logs.forEach(log => {
-                    fileLogger.writeToFile(log.level, log.module, log.message);
+                    fileLogger.writeToFile(log.level, log.module, log.message, true); // fromSidebar = true
                 });
+                break;
+            
+            // ✅ 查询作者下载状态
+            case 'QUERY_AUTHOR_STATUS':
+                logger.info(`📊 收到查询作者状态请求: UID=${event.data.uid}`);
+                await this.handleQueryAuthorStatus(event.data, iframe);
+                break;
+            
+            // ✅ 更新作者下载状态
+            case 'UPDATE_AUTHOR_DOWNLOAD_STATUS':
+                logger.info(`📝 收到更新作者下载状态: ${event.data.uid} -> ${event.data.status}`);
+                await this.handleUpdateAuthorDownloadStatus(event.data, iframe);
                 break;
                 
             default:
@@ -284,46 +308,14 @@ class ContentScript {
     }
 
     /**
-     * ✅ 处理加载收藏夹列表
+     * ✅ 处理加载收藏夹列表（使用配置化方式）
      */
     async _handleLoadCollectsList(iframe) {
-        try {
-            // ✅ 使用配置的获取数量
-            const maxCount = CONFIG.FETCH_CONFIG.COLLECTS_LIST_MAX_COUNT;
-            const result = await platformAPI.getCollects(0, maxCount);
-            
-            if (!result || !result.collects) {
-                throw new Error('获取收藏夹列表失败');
-            }
-            
-            const collects = result.collects;
-            logger.info(`✅ 已加载 ${collects.length} 个收藏夹`);
-            
-            // ✅ 保存到数据库
-            try {
-                const { saveCollects } = await import('../data/storage/collects-manager.js');
-                await saveCollects(fileSystem, collects);
-                logger.info(`💾 已保存 ${collects.length} 个收藏夹到数据库`);
-            } catch (saveError) {
-                logger.warn('⚠️ 保存收藏夹列表失败:', saveError.message);
-            }
-            
-            // 发送响应到 Sidebar
-            iframe.contentWindow.postMessage({
-                source: 'content',
-                type: 'COLLECTS_LIST_LOADED',
-                collects: collects,
-                total: result.total || collects.length
-            }, '*');
-        } catch (error) {
-            logger.error('❌ 加载收藏夹列表失败:', error);
-            
-            iframe.contentWindow.postMessage({
-                source: 'content',
-                type: 'COLLECTS_LIST_ERROR',
-                error: error.message
-            }, '*');
-        }
+        // ✅ 统一处理：收藏夹也需要文件夹（folderRequired: true）
+        dataFetcher.setFolderSelected(true);
+        await dataFetcher._loadList('collects', iframe, { 
+            count: CONFIG.FETCH_CONFIG.COLLECTS_LIST_MAX_COUNT 
+        });
     }
 
     /**
@@ -377,105 +369,51 @@ class ContentScript {
     }
 
     /**
-     * ✅ P0: 处理单个作品下载（在 Content Script 中执行，只传 workId）
+     * ✅ 处理加载收藏夹作品
      */
-    async handleDownloadWorkById(data, iframe) {
-        const { workId, folderPath } = data;
-        
-        // ✅ P1: 设置超时（使用配置）
-        let timeoutId = null;
-        const timeoutMs = CONFIG.DOWNLOAD_CONFIG.single.contentScriptTimeout;
-        const timeoutPromise = new Promise((_, reject) => {
-            timeoutId = setTimeout(() => {
-                reject(new Error(`下载超时（${timeoutMs / 1000 / 60}分钟）`));
-            }, timeoutMs);
-        });
-        
+    async _handleLoadCollectWorks(data, iframe) {
         try {
-            logger.info(`📥 开始下载作品: ${workId}`);
+            const { collectIds } = data;
+            const allWorksMap = new Map();
             
-            // ✅ 实时获取作品详情（包括最新下载链接）
-            logger.info(`🔄 正在获取作品详情: ${workId}`);
-            const workDetail = await platformAPI.getWorkDetail(workId);
-            
-            if (!workDetail) {
-                throw new Error('获取作品详情失败');
-            }
-            
-            logger.info(`✅ 已获取作品详情: ${workDetail.workId}`);
-            
-            // ✅ 创建 SingleDownloader 实例（使用 Content Script 的 fileSystem）
-            const downloader = new SingleDownloader(fileSystem);
-            
-            // ✅ 执行下载（带超时）
-            const result = await Promise.race([
-                downloader.download(workDetail, folderPath),
-                timeoutPromise
-            ]);
-            
-            // ✅ 清除超时定时器
-            if (timeoutId) {
-                clearTimeout(timeoutId);
-            }
-            
-            // ✅ 通知 Sidebar 下载结果
-            if (result.success) {
-                logger.info(`✅ 下载成功: ${workId}`);
+            for (let i = 0; i < collectIds.length; i++) {
+                const collectId = collectIds[i];
+                logger.info(`📂 正在加载收藏夹 ${i + 1}/${collectIds.length}: ${collectId}`);
                 
-                // ✅ 立即通知 Sidebar，不等待保存和备份
-                iframe.contentWindow.postMessage({
-                    source: 'content',
-                    type: 'DOWNLOAD_SUCCESS',
-                    workId: workId,
-                    result: result
-                }, '*');
-                
-                // ✅ 异步保存到数据库并备份（不阻塞 UI）
-                const mediaType = workDetail.isImagePost ? 'image_post' : 'video';
-                
-                const record = {
-                    workId: workId,
-                    downloadTime: Date.now(),
-                    filePath: result.filePath || '',  // ✅ 使用 SingleDownloader 返回的路径
-                    fileSize: result.fileSize || 0,
-                    mediaType,
-                    quality: 'origin'
-                };
-                
-                // 使用 setTimeout 将保存操作放到下一个事件循环
-                setTimeout(async () => {
-                    try {
-                        await database.markAsDownloaded(record);  // ✅ 统一使用 markAsDownloaded()
-                        logger.info(`💾 已记录到数据库: ${workId}`);
-                        
-                        // ✅ 触发备份
-                        await backupManager.performSelectiveBackup(['completed_works']);
-                        logger.info('✅ 下载状态已备份到文件系统');
-                    } catch (error) {
-                        logger.error(`❌ 保存或备份失败: ${workId}`, error);
+                try {
+                    const works = await dataFetcher._loadList('bookmarked', iframe, { 
+                        collectId,
+                        maxCount: CONFIG.FETCH_CONFIG.LIST_DEFAULTS.BOOKMARKED
+                    });
+                    
+                    if (works && works.length > 0) {
+                        works.forEach(work => {
+                            allWorksMap.set(work.workId, work);
+                        });
+                        logger.info(`✅ 收藏夹 ${collectId} 加载完成: ${works.length} 个作品，累计 ${allWorksMap.size} 个（去重后）`);
                     }
-                }, 0);
-            } else {
-                logger.error(`❌ 下载失败: ${workId}`, result.error);
-                iframe.contentWindow.postMessage({
-                    source: 'content',
-                    type: 'DOWNLOAD_FAILED',
-                    workId: workId,
-                    error: result.error
-                }, '*');
-            }
-        } catch (error) {
-            // ✅ 清除超时定时器
-            if (timeoutId) {
-                clearTimeout(timeoutId);
+                } catch (error) {
+                    logger.error(`❌ 获取收藏夹 ${collectId} 的作品失败:`, error.message);
+                }
             }
             
-            logger.error(`❌ 下载异常: ${workId}`, error);
+            const mergedWorks = Array.from(allWorksMap.values());
+            logger.info(`✅ 总共获取 ${mergedWorks.length} 个作品（去重后）`);
+            
             iframe.contentWindow.postMessage({
                 source: 'content',
-                type: 'DOWNLOAD_FAILED',
-                workId: workId,
-                error: error.message || '未知错误'
+                type: 'COLLECT_WORKS_LOADED',
+                works: mergedWorks,
+                total: mergedWorks.length,
+                collectIds: collectIds
+            }, '*');
+        } catch (error) {
+            logger.error('❌ 加载收藏夹作品失败:', error);
+            
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'COLLECT_WORKS_ERROR',
+                error: error.message
             }, '*');
         }
     }
@@ -655,6 +593,181 @@ class ContentScript {
             
         } catch (error) {
             logger.error('❌ 停止批量下载失败:', error);
+        }
+    }
+
+    /**
+     * ✅ 处理作者作品下载请求（方案D）
+     * @param {Object} data - { uid, platformId, secUid, nickname, folderPath, batchId }
+     */
+    async handleDownloadAuthorWorks(data, iframe) {
+        const { uid, platformId, secUid, nickname, folderPath, batchId } = data;
+        
+        try {
+            logger.info(`👤 开始获取作者 ${nickname || uid} 的所有作品...`);
+            
+            // 1. 调用 API 获取作者所有作品
+            const works = await platformAPI.getAuthorWorksForDownload(platformId || secUid);
+            
+            if (!works || works.length === 0) {
+                logger.warn(`⚠️ 作者 ${nickname} 没有作品`);
+                
+                // 发送错误消息（复用 BATCH_DOWNLOAD_ERROR）
+                iframe.contentWindow.postMessage({
+                    source: 'content',
+                    type: 'BATCH_DOWNLOAD_ERROR',
+                    batchId: batchId,
+                    error: '该作者没有作品或获取失败'
+                }, '*');
+                
+                return;
+            }
+            
+            logger.info(`✅ 获取到 ${works.length} 个作品`);
+            
+            // ✅ 通知 Sidebar 作者作品总数
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'AUTHOR_WORKS_COUNT',
+                uid: uid,
+                totalCount: works.length
+            }, '*');
+            
+            // 2. 提取作品 ID 列表
+            const workIds = works.map(w => w.workId);
+            
+            // 3. 复用现有的批量下载逻辑
+            logger.info(`🚀 开始批量下载: ${workIds.length} 个作品`);
+            
+            // 动态导入 BatchDownloadManager
+            const { BatchDownloadManager } = await import('../download/batch-download-manager.js');
+            
+            // 创建 BatchDownloadManager 实例
+            const batchManager = new BatchDownloadManager(fileSystem);
+            
+            // 保存实例引用
+            this.currentBatchManager = batchManager;
+            this.currentBatchId = batchId;
+            
+            // 执行批量下载
+            const result = await batchManager.startWithIds(
+                batchId,
+                workIds,
+                folderPath,
+                (progress, lastResult) => {
+                    // 处理 ITEM_START 事件
+                    if (lastResult && lastResult.type === 'ITEM_START') {
+                        iframe.contentWindow.postMessage({
+                            source: 'content',
+                            type: 'BATCH_DOWNLOAD_ITEM_START',
+                            batchId: batchId,
+                            workId: lastResult.workId
+                        }, '*');
+                        return;
+                    }
+                    
+                    // 处理 UI_LOG 消息
+                    if (lastResult && lastResult.type === 'UI_LOG') {
+                        iframe.contentWindow.postMessage({
+                            source: 'content',
+                            type: 'UI_LOG',
+                            level: lastResult.level,
+                            message: lastResult.message
+                        }, '*');
+                        return;
+                    }
+                    
+                    // 发送进度消息
+                    iframe.contentWindow.postMessage({
+                        source: 'content',
+                        type: 'BATCH_DOWNLOAD_PROGRESS',
+                        batchId: batchId,
+                        progress: progress
+                    }, '*');
+                    
+                    // 发送单个作品的下载结果
+                    if (lastResult) {
+                        if (lastResult.success) {
+                            // ✅ 发送成功消息
+                            iframe.contentWindow.postMessage({
+                                source: 'content',
+                                type: 'DOWNLOAD_SUCCESS',
+                                workId: lastResult.workId,
+                                result: lastResult
+                            }, '*');
+                            
+                            // ✅ 发送作者作品进度消息（新增）
+                            iframe.contentWindow.postMessage({
+                                source: 'content',
+                                type: 'AUTHOR_WORK_PROGRESS',
+                                uid: uid,
+                                success: true
+                            }, '*');
+                        } else {
+                            // ✅ 发送失败消息
+                            iframe.contentWindow.postMessage({
+                                source: 'content',
+                                type: 'DOWNLOAD_FAILED',
+                                workId: lastResult.workId,
+                                error: lastResult.error
+                            }, '*');
+                            
+                            // ✅ 发送作者作品进度消息（新增）
+                            iframe.contentWindow.postMessage({
+                                source: 'content',
+                                type: 'AUTHOR_WORK_PROGRESS',
+                                uid: uid,
+                                success: false
+                            }, '*');
+                        }
+                    }
+                }
+            );
+            
+            // 发送完成消息
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'BATCH_DOWNLOAD_COMPLETE',
+                batchId: batchId,
+                result: result
+            }, '*');
+            
+            logger.info(`✅ 作者作品下载完成: 成功 ${result.progress.success}, 失败 ${result.progress.failed}`);
+            
+            // ✅ 更新作者下载状态到 IndexedDB（新增）
+            try {
+                // ✅ 直接使用已导入的函数，避免动态导入
+                const { updateAuthorDownloadStatus } = await import('../data/storage/authors-manager.js');
+                
+                const totalWorks = works.length;
+                const downloadedCount = result.progress.success;
+                const status = result.progress.failed === 0 ? 'completed' : 'partial';
+                
+                await updateAuthorDownloadStatus(fileSystem, backupManager, uid, status, downloadedCount, totalWorks);
+                
+                logger.info(`✅ 已更新作者下载状态: ${uid} -> ${status} (${downloadedCount}/${totalWorks})`);
+            } catch (error) {
+                logger.error('❌ 更新作者下载状态失败:', error);
+            }
+            
+            // 清理引用
+            this.currentBatchManager = null;
+            this.currentBatchId = null;
+            
+        } catch (error) {
+            logger.error(`❌ 作者作品下载异常: ${uid}`, error);
+            
+            // 发送错误消息
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'BATCH_DOWNLOAD_ERROR',
+                batchId: batchId,
+                error: error.message || '未知错误'
+            }, '*');
+            
+            // 清理引用
+            this.currentBatchManager = null;
+            this.currentBatchId = null;
         }
     }
 
@@ -873,6 +986,59 @@ class ContentScript {
             }, '*');
         } else {
             logger.warn('⚠️ 未找到侧边栏 iframe，无法发送消息:', data.type);
+        }
+    }
+    
+    /**
+     * ✅ 处理查询作者下载状态
+     */
+    async handleQueryAuthorStatus(data, iframe) {
+        const { uid } = data;
+        
+        try {
+            // ✅ 直接使用已导入的函数，避免动态导入
+            const { getAuthorDownloadStatus } = await import('../data/storage/authors-manager.js');
+            
+            // 查询状态
+            const status = await getAuthorDownloadStatus(fileSystem, uid);
+            
+            logger.info(`📊 查询作者状态: ${uid}`, status);
+            
+            // 返回结果
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'AUTHOR_STATUS_RESPONSE',
+                uid,
+                status: status || null
+            }, '*');
+        } catch (error) {
+            logger.error('❌ 查询作者状态失败:', error);
+            
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'AUTHOR_STATUS_RESPONSE',
+                uid,
+                status: null
+            }, '*');
+        }
+    }
+    
+    /**
+     * ✅ 处理更新作者下载状态
+     */
+    async handleUpdateAuthorDownloadStatus(data, iframe) {
+        const { uid, status, downloadedCount, totalCount } = data;
+        
+        try {
+            // ✅ 直接使用已导入的函数，避免动态导入
+            const { updateAuthorDownloadStatus } = await import('../data/storage/authors-manager.js');
+            
+            // 更新状态（会自动触发备份）
+            await updateAuthorDownloadStatus(fileSystem, backupManager, uid, status, downloadedCount, totalCount);
+            
+            logger.info(`✅ 作者状态已更新: ${uid} -> ${status} (${downloadedCount}/${totalCount})`);
+        } catch (error) {
+            logger.error('❌ 更新作者状态失败:', error);
         }
     }
 }

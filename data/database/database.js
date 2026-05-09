@@ -110,11 +110,11 @@ export class Database {
             if (Array.isArray(data)) {
                 logger.info(`💾 准备保存 ${data.length} 条记录到 ${storeName}`);
                 data.forEach(item => {
-                    logger.debug(`   └─ 保存: ${item.workId || item.id || 'unknown'}`);
+                    logger.debug(`   └─ 保存: ${item.workId || item.collectId || item.uid || item.id || 'unknown'}`);
                     store.put(item);
                 });
             } else {
-                logger.info(`💾 准备保存 1 条记录到 ${storeName}: ${data.workId || data.id || 'unknown'}`);
+                logger.info(`💾 准备保存 1 条记录到 ${storeName}: ${data.workId || data.collectId || data.uid || data.id || 'unknown'}`);
                 store.put(data);
             }
 

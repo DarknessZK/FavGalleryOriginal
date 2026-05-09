@@ -10,6 +10,14 @@
 使用浏览器原生 API（File System Access API、IndexedDB）
 增量更新机制，避免重复操作
 尊重平台速率限制，内置防频控保护
+
+📖 **开发文档**：
+- [架构设计文档](./docs/ARCHITECTURE.md)
+- [项目开发规则](./docs/DEVELOPMENT_RULES.md) ⭐ **所有 PR 必须符合此规范**
+- [快速参考卡片](./docs/QUICK_REFERENCE.md) 💡 编码时快速查阅
+- [代码审查体系](./docs/CODE_REVIEW_SYSTEM.md) 🔍 PR 审查流程说明
+- [自动化审查设置](./docs/AUTOMATED_REVIEW_SETUP.md) 🤖 ESLint + GitHub Actions
+- [贡献者指南](./CONTRIBUTING.md) 🤝 如何参与项目
 免责声明： 本工具仅用于帮助用户管理自己账号的个人数据，不涉及任何第三方数据的获取或传播。用户需遵守各平台的使用条款，合理使用本工具。本工具不提供任何破解、绕过平台限制的功能。
 适用场景：
 ✅ 个人数据归档和备份

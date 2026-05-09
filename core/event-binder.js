@@ -29,21 +29,33 @@ class EventBinder {
         
         // 3.5. 刷新收藏列表
         this.bindLoadBookmarkedWorks();
+        
+        // 3.6. ✅ 刷新关注列表
+        this.bindLoadFollowingAuthors();
 
         // 4. 点赞列表搜索
         this.bindLikedSearch();
 
         // 4.5. ✅ 收藏列表搜索
         this.bindBookmarkedSearch();
+        
+        // 4.6. ✅ 关注列表搜索
+        this.bindFollowingSearch();
 
         // 5. 点赞列表分页
         this.bindLikedPagination();
 
         // 5.5. ✅ 收藏列表分页
         this.bindBookmarkedPagination();
+        
+        // 5.6. ✅ 关注列表分页
+        this.bindFollowingPagination();
 
         // 6. 作品卡片单个下载（事件委托）
         this.bindWorkCardActions();
+        
+        // 6.5. ✅ 关注列表作者卡片操作（保存作者所有作品）
+        this.bindFollowingCardActions();
 
         // 7. 点赞列表批量操作
         this.bindLikedBatchOperations();
@@ -80,7 +92,7 @@ class EventBinder {
         const tabLiked = document.getElementById('tabLiked');
         const tabBookmarked = document.getElementById('tabBookmarked');
 
-        logger.info('📑 Tab 元素检查:', {
+        logger.debug('📑 Tab 元素检查:', {
             tabFollowing: !!tabFollowing,
             tabLiked: !!tabLiked,
             tabBookmarked: !!tabBookmarked
@@ -188,6 +200,16 @@ class EventBinder {
     }
     
     /**
+     * ✅ 绑定关注列表搜索框
+     */
+    bindFollowingSearch() {
+        const followingSearchInput = document.getElementById('searchInput');
+        if (followingSearchInput) {
+            this._bindAuthorSearchInput(followingSearchInput);
+        }
+    }
+    
+    /**
      * ✅ 通用搜索框绑定方法（支持点赞和收藏）
      * @param {HTMLElement} searchInput - 搜索输入框元素
      * @param {string} listType - 列表类型 ('liked' | 'bookmarked')
@@ -213,6 +235,37 @@ class EventBinder {
                     .map(work => work.workId);
                 logger.info(`🔍 搜索后同步 checkbox: 当前页 ${currentPageItems.length} 个作品, 选中 ${selectedIds.length} 个`);
                 logger.info(`🔍 内存中的选中状态: ${this.app.batchSelectionManager.state[listType].selectedWorkIds.size} 个`);
+    
+                // ✅ 在渲染时直接传递选中状态，消除闪烁
+                manager.updateUI(new Set(selectedIds));
+            }, 300);
+        });
+    }
+    
+    /**
+     * ✅ 作者列表搜索框绑定方法（关注列表专用）
+     * @param {HTMLElement} searchInput - 搜索输入框元素
+     */
+    _bindAuthorSearchInput(searchInput) {
+        let searchTimer = null;
+        searchInput.addEventListener('input', async (event) => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(async () => {
+                const manager = this.app.followingManager;
+                
+                manager.initElements();
+                manager.search(event.target.value);
+                
+                // ✅ UI 日志
+                logToUI('info', `🔍 搜索作者: ${event.target.value}`);
+                
+                // ✅ 获取当前页的选中状态，传递给 updateUI
+                const currentPageItems = manager.getCurrentPageData();
+                const selectedIds = currentPageItems
+                    .filter(author => this.app.batchSelectionManager.state.following.selectedAuthorIds.has(author.uid))
+                    .map(author => author.uid);
+                logger.info(`🔍 搜索后同步 checkbox: 当前页 ${currentPageItems.length} 个作者, 选中 ${selectedIds.length} 个`);
+                logger.info(`🔍 内存中的选中状态: ${this.app.batchSelectionManager.state.following.selectedAuthorIds.size} 个`);
     
                 // ✅ 在渲染时直接传递选中状态，消除闪烁
                 manager.updateUI(new Set(selectedIds));
@@ -292,6 +345,57 @@ class EventBinder {
     bindBookmarkedPagination() {
         this._bindPagination('bookmarked');
     }
+    
+    /**
+     * ✅ 绑定关注列表分页按钮
+     */
+    bindFollowingPagination() {
+        const prevBtn = document.getElementById('followingPrevPage');
+        const nextBtn = document.getElementById('followingNextPage');
+        const manager = this.app.followingManager;
+    
+        if (prevBtn) {
+            prevBtn.addEventListener('click', async () => {
+                manager.initElements();
+                manager.prevPage();
+    
+                // ✅ UI 日志
+                logToUI('info', `⬅️ 切换到第 ${manager.currentPage} 页`);
+    
+                // ✅ 获取当前页的选中状态，传递给 updateUI
+                const currentPageItems = manager.getCurrentPageData();
+                const selectedIds = currentPageItems
+                    .filter(author => this.app.batchSelectionManager.state.following.selectedAuthorIds.has(author.uid))
+                    .map(author => author.uid);
+                logger.info(`🔍 分页后同步 checkbox: 当前页 ${currentPageItems.length} 个作者, 选中 ${selectedIds.length} 个`);
+                logger.info(`🔍 内存中的选中状态: ${this.app.batchSelectionManager.state.following.selectedAuthorIds.size} 个`);
+    
+                // ✅ 在渲染时直接传递选中状态，消除闪烁
+                manager.updateUI(new Set(selectedIds));
+            });
+        }
+    
+        if (nextBtn) {
+            nextBtn.addEventListener('click', async () => {
+                manager.initElements();
+                manager.nextPage();
+    
+                // ✅ UI 日志
+                logToUI('info', `➡️ 切换到第 ${manager.currentPage} 页`);
+    
+                // ✅ 获取当前页的选中状态，传递给 updateUI
+                const currentPageItems = manager.getCurrentPageData();
+                const selectedIds = currentPageItems
+                    .filter(author => this.app.batchSelectionManager.state.following.selectedAuthorIds.has(author.uid))
+                    .map(author => author.uid);
+                logger.info(`🔍 分页后同步 checkbox: 当前页 ${currentPageItems.length} 个作者, 选中 ${selectedIds.length} 个`);
+                logger.info(`🔍 内存中的选中状态: ${this.app.batchSelectionManager.state.following.selectedAuthorIds.size} 个`);
+    
+                // ✅ 在渲染时直接传递选中状态，消除闪烁
+                manager.updateUI(new Set(selectedIds));
+            });
+        }
+    }
 
     /**
      * 绑定作品卡片操作（事件委托）
@@ -309,6 +413,84 @@ class EventBinder {
             this._bindListEvents(bookmarkedList, 'bookmarked');
         }
     }
+    
+    /**
+     * ✅ 绑定关注列表作者卡片操作（事件委托）
+     */
+    bindFollowingCardActions() {
+        const followingList = document.getElementById('followingList');
+        if (!followingList) return;
+        
+        followingList.addEventListener('click', (event) => {
+            // ✅ 优先级 1: 检查是否点击下载按钮（保存作者所有作品）
+            const downloadBtn = event.target.closest('.download-btn');
+            if (downloadBtn && !downloadBtn.disabled) {
+                const uid = downloadBtn.dataset.uid;
+                logger.info(`👤 点击了作者保存按钮: ${uid}`);
+                
+                // ✅ 获取作者信息
+                const authorItem = downloadBtn.closest('.author-item');
+                if (!authorItem) return;
+                
+                const authorData = this.app.followingManager.allAuthors?.find(a => a.uid === uid);
+                if (!authorData) {
+                    logger.warn(`⚠️ 未找到作者数据: ${uid}`);
+                    return;
+                }
+                
+                // ✅ 调用 AuthorDownloadManager，传递 button 引用
+                this.app.authorDownloadManager.startAuthorDownload(
+                    authorData.uid,
+                    authorData.platformId || '',
+                    authorData.nickname,
+                    downloadBtn  // ✅ 传递按钮DOM引用
+                );
+                
+                // ✅ 触发下载（发送消息到 Content Script）
+                window.parent.postMessage({
+                    source: 'sidebar',
+                    type: 'DOWNLOAD_AUTHOR_WORKS',
+                    uid: authorData.uid,
+                    platformId: authorData.platformId || ''
+                }, '*');
+                
+                return;  // ✅ 阻止后续处理
+            }
+    
+            // ✅ 优先级 2: 检查是否点击跳转链接
+            const jumpBtn = event.target.closest('.jump-btn');
+            if (jumpBtn) {
+                // a 标签默认行为即可，不需要额外处理
+                return;  // ✅ 阻止后续处理
+            }
+    
+            // ✅ 优先级 3: 检查是否点击复选框
+            const checkbox = event.target.closest('.author-checkbox');
+            if (checkbox) {
+                const uid = checkbox.dataset.uid;
+                logger.info(`☑️ 作者复选框状态变化: ${uid}, checked=${checkbox.checked}`);
+                this.app.batchSelectionManager.handleCheckboxChange('following', uid, checkbox.checked);
+                return;  // ✅ 阻止后续处理
+            }
+    
+            // ✅ 优先级 4: 点击卡片任意位置，切换复选框状态
+            const authorItem = event.target.closest('.author-item');
+            if (authorItem) {
+                const uid = authorItem.dataset.uid;
+                const cardCheckbox = authorItem.querySelector('.author-checkbox');
+    
+                if (cardCheckbox && !cardCheckbox.disabled) {
+                    // 切换复选框状态
+                    cardCheckbox.checked = !cardCheckbox.checked;
+    
+                    // 触发 change 事件（手动）
+                    logger.info(`☑️ 点击卡片切换作者复选框: ${uid}, checked=${cardCheckbox.checked}`);
+                    this.app.batchSelectionManager.handleCheckboxChange('following', uid, cardCheckbox.checked);
+                }
+                return;  // ✅ 阻止后续处理
+            }
+        });
+    }
         
     /**
      * ✅ 绑定单个列表的事件（通用方法）
@@ -322,7 +504,13 @@ class EventBinder {
             if (downloadBtn && !downloadBtn.disabled) {
                 const workId = downloadBtn.dataset.workId;
                 logger.info(`👆 点击了下载按钮: ${workId}`);
-                this.app.handleSingleWorkDownload(workId);
+                
+                // ✅ 根据当前标签页调用对应的独立方法
+                if (listType === 'liked') {
+                    this.app.handleLikedDownload([workId]);
+                } else if (listType === 'bookmarked') {
+                    this.app.handleBookmarkedDownload([workId]);
+                }
                 return;  // ✅ 阻止后续处理
             }
     
@@ -377,7 +565,8 @@ class EventBinder {
 
         if (likedBatchDownloadBtn) {
             likedBatchDownloadBtn.addEventListener('click', () => {
-                this.app.handleBatchDownload('liked');
+                const selectedIds = this.app.batchSelectionManager.getSelectedWorkIds('liked');
+                this.app.handleLikedDownload(selectedIds);
             });
         }
 
@@ -404,7 +593,8 @@ class EventBinder {
 
         if (bookmarkedBatchDownloadBtn) {
             bookmarkedBatchDownloadBtn.addEventListener('click', () => {
-                this.app.handleBatchDownload('bookmarked');
+                const selectedIds = this.app.batchSelectionManager.getSelectedWorkIds('bookmarked');
+                this.app.handleBookmarkedDownload(selectedIds);
             });
         }
 
@@ -431,7 +621,8 @@ class EventBinder {
 
         if (followingBatchDownloadBtn) {
             followingBatchDownloadBtn.addEventListener('click', () => {
-                this.app.handleBatchDownload('following');
+                const selectedUids = this.app.batchSelectionManager.getSelectedAuthorIds();
+                this.app.handleAuthorDownload(selectedUids);
             });
         }
 

@@ -1,0 +1,22 @@
+# 依赖目录
+node_modules/
+vendor/
+
+# 构建输出
+dist/
+build/
+*.min.js
+
+# 第三方库
+lib/
+
+# 文档
+docs/
+*.md
+
+# 配置文件（可选，根据需求调整）
+# *.config.js
+
+# 测试文件（如果需要单独配置）
+# test/
+# *.test.js

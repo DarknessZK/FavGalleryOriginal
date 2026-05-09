@@ -5,6 +5,9 @@
 
 import { DOUYIN_CONFIG } from './config.js';
 import { selectHighestQualityUrl, safeGet } from '../../utils/platform-helpers.js';
+import { createLogger } from '../../utils/logger.js';
+
+const logger = createLogger('DouyinHelpers');
 
 // ===== 设备参数相关 =====
 
@@ -67,7 +70,7 @@ export function getDouyinWebId() {
  */
 export function getUserInfoFromPage() {
     try {
-        console.log('=== 开始获取用户信息 ===');
+        logger.debug('=== 开始获取用户信息 ===');
 
         let userInfo = null;
         let successMethod = null;
@@ -143,7 +146,7 @@ export function getUserInfoFromPage() {
         if (userInfo && userInfo.uid) {
             const result = normalizeUserInfo(userInfo);
 
-            console.log(`✅ 用户信息获取成功 (${successMethod}):`, result.nickname, {
+            logger.info(`✅ 用户信息获取成功 (${successMethod}):`, result.nickname, {
                 uid: result.uid,
                 followingCount: result.followingCount,
                 favoritingCount: result.favoritingCount,
@@ -153,17 +156,17 @@ export function getUserInfoFromPage() {
             return result;
         } else {
             // ❌ 所有方法都失败了，输出详细错误信息
-            console.error('❌ 所有方法均未获取到用户信息');
-            console.error('=== 各方法失败原因 ===');
+            logger.error('❌ 所有方法均未获取到用户信息');
+            logger.error('=== 各方法失败原因 ===');
             errors.forEach((err, index) => {
-                console.error(`  ${index + 1}. ${err.method}: ${err.error}`);
+                logger.error(`  ${index + 1}. ${err.method}: ${err.error}`);
             });
-            console.error('=====================');
-            console.error('💡 提示：请确保已登录抖音，并检查页面结构是否变化');
+            logger.error('=====================');
+            logger.error('💡 提示：请确保已登录抖音，并检查页面结构是否变化');
             return null;
         }
     } catch (error) {
-        console.error('获取用户信息时发生未预期的错误:', error);
+        logger.error('获取用户信息时发生未预期的错误:', error);
         return null;
     }
 }

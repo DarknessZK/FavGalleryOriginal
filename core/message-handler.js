@@ -170,6 +170,31 @@ class MessageHandler {
                 case 'BATCH_DOWNLOAD_ERROR':
                     this.app.handleBatchDownloadError(event.data);
                     break;
+                
+                // ✅ 作者下载状态查询响应
+                case 'AUTHOR_STATUS_RESPONSE':
+                    // 由 AuthorDownloadManager 处理，这里不处理
+                    break;
+                
+                // ✅ 作者作品总数通知
+                case 'AUTHOR_WORKS_COUNT':
+                    if (this.app.authorDownloadManager) {
+                        this.app.authorDownloadManager.setTotalWorks(
+                            event.data.uid,
+                            event.data.totalCount
+                        );
+                    }
+                    break;
+                
+                // ✅ 作者作品下载进度
+                case 'AUTHOR_WORK_PROGRESS':
+                    if (this.app.authorDownloadManager) {
+                        this.app.authorDownloadManager.workCompleted(
+                            event.data.uid,
+                            event.data.success
+                        );
+                    }
+                    break;
 
                 default:
                     logger.warn('⚠️ 未知消息类型:', event.data.type);

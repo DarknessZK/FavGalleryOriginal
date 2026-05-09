@@ -12,6 +12,7 @@ import { MessageHandler } from './message-handler.js';
 import { EventBinder } from './event-binder.js';
 import { ListDisplayManager } from './list-display-manager.js';
 import { DownloadHandler } from './download-handler.js';
+import { AuthorDownloadManager } from './author-download-manager.js';
 import { MultiTagSelector } from '../ui/components/multi-tag-selector.js';
 import { CONFIG } from '../config/constants.js';
 import { WorkListManager } from '../utils/work-list-manager.js';
@@ -45,6 +46,9 @@ class App {
         
         // ✅ 下载处理器
         this.downloadHandler = new DownloadHandler(this);
+        
+        // ✅ 作者下载管理器
+        this.authorDownloadManager = new AuthorDownloadManager(this);
 
         // 管理器
         this.tabManager = new TabManager(this);
@@ -58,6 +62,9 @@ class App {
         // ✅ 收藏列表管理器
         this.bookmarkedManager = new WorkListManager({ type: 'bookmarked' });
         
+        // ✅ 关注列表管理器（作者列表）
+        this.followingManager = new WorkListManager({ type: 'following' });
+        
         // ✅ 收藏夹多选标签选择器
         this.collectsSelector = null; // 稍后初始化
 
@@ -69,7 +76,7 @@ class App {
      */
     async init() {
         logger.info('🚀 系统初始化开始...');
-        logger.info('📄 当前 DOM 状态:', {
+        logger.debug('📄 当前 DOM 状态:', {
             readyState: document.readyState,
             bodyExists: !!document.body,
             tabFollowingExists: !!document.getElementById('tabFollowing'),
@@ -77,10 +84,7 @@ class App {
             tabBookmarkedExists: !!document.getElementById('tabBookmarked')
         });
 
-        // ✅ 设置 container 固定高度（基于初始视口）
-        this.setupContainerHeight();
-
-        // ✅ 初始化文件系统（包括日志系统）
+        // ✅ 先初始化其他组件
         await this.initializeFileSystem();
 
         // 更新平台信息
@@ -95,6 +99,11 @@ class App {
         // 请求用户信息
         this.requestUserInfo();
 
+        // ✅ 最后设置容器高度（确保 DOM 和 CSS 已完全加载）
+        requestAnimationFrame(() => {
+            this.setupContainerHeight();
+        });
+
         logger.info('✅ 系统初始化完成，就绪');
     }
 
@@ -107,7 +116,7 @@ class App {
         if (container) {
             // 设置为当前视口高度，之后不再随窗口变化
             container.style.height = window.innerHeight + 'px';
-            logger.info('📏 Container 高度设置为:', window.innerHeight + 'px');
+            logger.debug('📏 Container 高度设置为:', window.innerHeight + 'px');
         }
     }
 
@@ -219,6 +228,34 @@ class App {
      */
     clearBookmarkedList() {
         this.listDisplayManager.clearBookmarkedList(this.bookmarkedManager);
+    }
+    
+    /**
+     * ✅ 处理加载关注列表
+     */
+    handleLoadFollowingAuthors() {
+        this.listDisplayManager.handleLoadFollowingAuthors();
+    }
+    
+    /**
+     * ✅ 处理关注作者列表加载完成
+     */
+    async handleFollowingAuthorsLoaded(authors, total) {
+        await this.listDisplayManager.handleFollowingAuthorsLoaded(authors, total, this.followingManager);
+    }
+    
+    /**
+     * ✅ 处理关注作者列表加载进度
+     */
+    handleFollowingAuthorsProgress(currentCount, totalCount) {
+        this.listDisplayManager.handleFollowingAuthorsProgress(currentCount, totalCount, this.followingManager);
+    }
+    
+    /**
+     * ✅ 处理关注作者列表加载错误
+     */
+    handleFollowingAuthorsError(error) {
+        this.listDisplayManager.handleFollowingAuthorsError(error, this.followingManager);
     }
     
     /**
@@ -379,6 +416,11 @@ class App {
             // ✅ UI 日志
             logToUI('info', `✅ 已选择文件夹: ${data.path}`);
 
+            // ✅ 通知 FileLogger 已选择文件夹
+            import('../utils/file-logger.js').then(({ default: fileLogger }) => {
+                fileLogger.setFolderSelected(true);
+            });
+
             // ✅ 启用相关按钮
             this.uiStateManager.enableButtons();
 
@@ -394,6 +436,11 @@ class App {
 
             // ✅ UI 日志
             logToUI('error', `❌ 选择文件夹失败: ${data.error}`);
+
+            // ✅ 通知 FileLogger 文件夹选择失败
+            import('../utils/file-logger.js').then(({ default: fileLogger }) => {
+                fileLogger.setFolderSelected(false);
+            });
 
             logger.error('❌ 文件夹选择失败:', data.error);
         }
@@ -459,28 +506,12 @@ class App {
     // ==========================================
 
     /**
-     * 处理单个作品下载
-     * @param {string} workId - 作品ID
-     */
-    async handleSingleWorkDownload(workId) {
-        await this.downloadHandler.handleSingleWorkDownload(workId);
-    }
-
-    /**
      * 处理批量选择变化（下拉框）
      * @param {string} listType - 列表类型：'liked' | 'bookmarked' | 'following'
      * @param {string} selectionType - 选择类型：'current' | 'all' | ''
      */
     handleBatchSelectionChange(listType, selectionType) {
         this.batchSelectionManager.handleBatchSelectionChange(listType, selectionType);
-    }
-
-    /**
-     * 处理批量下载
-     * @param {string} listType - 列表类型：'liked' | 'bookmarked' | 'following'
-     */
-    async handleBatchDownload(listType) {
-        await this.downloadHandler.handleBatchDownload(listType);
     }
 
     /**
@@ -532,6 +563,38 @@ class App {
      */
     handleBatchDownloadItemStart(data) {
         this.downloadHandler.handleBatchDownloadItemStart(data);
+    }
+
+    /**
+     * ✅ 处理单个作者的所有作品下载
+     * @param {Array} uids - 作者 UID 数组
+     */
+    async handleAuthorDownload(uids) {
+        await this.downloadHandler.handleAuthorDownload(uids);
+    }
+
+    /**
+     * ✅ 点赞列表批量下载（独立入口）
+     * @param {Array} workIds - 作品ID数组
+     */
+    async handleLikedDownload(workIds) {
+        await this.downloadHandler.handleLikedDownload(workIds);
+    }
+
+    /**
+     * ✅ 收藏列表批量下载（独立入口）
+     * @param {Array} workIds - 作品ID数组
+     */
+    async handleBookmarkedDownload(workIds) {
+        await this.downloadHandler.handleBookmarkedDownload(workIds);
+    }
+
+    /**
+     * ✅ 处理停止下载
+     * @param {string} listType - 列表类型：'liked' | 'bookmarked' | 'following'
+     */
+    async handleStopDownload(listType) {
+        await this.downloadHandler.handleStopDownload(listType);
     }
 
     /**

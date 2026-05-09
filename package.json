@@ -1,0 +1,33 @@
+{
+  "name": "favgallery",
+  "version": "1.0.0",
+  "description": "数字收藏馆 - 帮助用户管理和备份个人社交平台的收藏内容",
+  "main": "background.js",
+  "scripts": {
+    "lint": "eslint . --ext .js",
+    "lint:fix": "eslint . --ext .js --fix",
+    "lint:strict": "eslint . --ext .js --max-warnings 0",
+    "test": "echo \"No tests specified yet\" && exit 0",
+    "precommit": "npm run lint:strict"
+  },
+  "keywords": [
+    "chrome-extension",
+    "bookmark-manager",
+    "douyin",
+    "xiaohongshu",
+    "social-media"
+  ],
+  "author": "FavGallery Team",
+  "license": "MIT",
+  "devDependencies": {
+    "eslint": "^8.56.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/FavGallery/FavGallery.git"
+  },
+  "bugs": {
+    "url": "https://github.com/FavGallery/FavGallery/issues"
+  },
+  "homepage": "https://github.com/FavGallery/FavGallery#readme"
+}

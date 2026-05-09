@@ -18,107 +18,175 @@ class DownloadHandler {
     }
 
     /**
-     * 处理单个作品下载
-     * @param {string} workId - 作品ID
+     * ✅ 点赞列表批量下载（独立入口）
+     * @param {Array} workIds - 作品ID数组
      */
-    async handleSingleWorkDownload(workId) {
-        try {
-            logger.info(`📥 开始下载单个作品: ${workId}`);
+    async handleLikedDownload(workIds) {
+        if (!workIds || workIds.length === 0) {
+            logger.warn('⚠️ 没有选择要下载的作品');
+            return;
+        }
+        
+        // 设置状态
+        this.isDownloading = true;
+        this.currentBatchId = Date.now().toString();
+        this.currentBatchListType = 'liked';
+        
+        // 禁用按钮
+        this.app.uiStateManager.disableAllControlButtons();
+        this.app.uiStateManager.disableAllWorkDownloadButtons();
+        
+        // 调用核心下载逻辑
+        await this._executeBatchDownload(workIds, this.app.folderName, this.currentBatchId);
+    }
 
-            // 检查是否已选择文件夹
+    /**
+     * ✅ 收藏列表批量下载（独立入口）
+     * @param {Array} workIds - 作品ID数组
+     */
+    async handleBookmarkedDownload(workIds) {
+        if (!workIds || workIds.length === 0) {
+            logger.warn('⚠️ 没有选择要下载的作品');
+            return;
+        }
+        
+        // 设置状态
+        this.isDownloading = true;
+        this.currentBatchId = Date.now().toString();
+        this.currentBatchListType = 'bookmarked';
+        
+        // 禁用按钮
+        this.app.uiStateManager.disableAllControlButtons();
+        this.app.uiStateManager.disableAllWorkDownloadButtons();
+        
+        // 调用核心下载逻辑
+        await this._executeBatchDownload(workIds, this.app.folderName, this.currentBatchId);
+    }
+
+    /**
+     * ✅ 处理作者的批量下载（保存作者所有作品）
+     * @param {Array} uids - 作者 UID 数组
+     */
+    async handleAuthorDownload(uids) {
+        try {
+            logger.info(`👤 开始下载 ${uids.length} 个作者的所有作品: ${uids.join(', ')}`);
+        
+            // 1. 检查是否已选择文件夹
             if (!this.app.folderSelected) {
                 logger.error('❌ 请先选择文件夹');
-                logToUI('error', '❌ 请先点击"选择文件夹"按钮');
-                this._showStatusMessage('folderStatus', '❌ 请先点击"选择文件夹"按钮', '#ff4d4f');
+                logToUI('error', '❌ 请先点击“选择文件夹”按钮');
+                this._showStatusMessage('folderStatus', '❌ 请先点击“选择文件夹”按钮', '#ff4d4f');
                 return;
             }
-
-            // 从当前列表中找到作品数据
-            let targetManager;
-            if (this.app.currentActiveTab === 'liked') {
-                targetManager = this.app.likedManager;
-            } else if (this.app.currentActiveTab === 'bookmarked') {
-                targetManager = this.app.bookmarkedManager;
-            } else if (this.app.currentActiveTab === 'following') {
-                targetManager = this.app.followingManager;
-            } else {
-                logger.error(`❌ 未知的标签页类型: ${this.app.currentActiveTab}`);
-                logToUI('error', '❌ 系统错误，请刷新页面');
+        
+            // 2. 检查并发控制
+            if (this.isDownloading) {
+                logger.warn('⚠️ 已有下载任务在运行');
+                logToUI('warning', '⚠️ 已有保存任务在运行，请等待完成或停止后再试');
                 return;
             }
-            
-            const allWorks = targetManager.allWorks || [];
-            const work = allWorks.find(w => w.workId === workId);
-
-            if (!work) {
-                logger.error(`❌ 未找到作品: ${workId}`);
-                logToUI('error', '❌ 未找到作品数据，请刷新列表后重试');
-                return;
-            }
-
-            // ✅ UI 日志（通过所有检查后才记录）
-            const workDesc = work.desc ? (work.desc.length > 20 ? work.desc.substring(0, 20) + '...' : work.desc) : '无描述';
-            logToUI('info', `📥 开始下载作品: ${workDesc}`);
-
-            // ✅ 获取文件夹路径（使用保存的文件夹名称）
-            const folderPath = this.app.folderName;
-            if (!folderPath) {
-                logger.error('❌ 未获取到文件夹路径');
-                logToUI('error', '❌ 文件夹路径无效，请重新选择');
-                this._showStatusMessage('folderStatus', '❌ 文件夹路径无效，请重新选择', '#ff4d4f');
-                return;
-            }
-
-            // ✅ 设置下载状态标志
+        
+            // 3. 设置下载状态
             this.isDownloading = true;
-
-            // ✅ 禁用所有控制按钮和其他作品卡片按钮（防止并发）
+            this.currentBatchId = `author_batch_${Date.now()}`;
+            this.currentBatchListType = 'following';
+        
+            // 4. 禁用所有控制按钮
             this.app.uiStateManager.disableAllControlButtons();
             this.app.uiStateManager.disableAllWorkDownloadButtons();
-
-            // ✅ 更新按钮状态为下载中
-            this._setWorkDownloadStatus(workId, 'downloading');
-
-            // ✅ P0: 发送消息到 Content Script，由它执行下载（只传 workId）
-            logger.info(`🚀 发送下载请求到 Content Script: ${workId}`);
-            window.parent.postMessage({
-                source: 'sidebar',
-                type: 'DOWNLOAD_WORK_BY_ID',
-                workId: workId,
-                folderPath: folderPath
-            }, '*');
-
+        
+            // 5. 启用停止下载按钮
+            document.querySelectorAll('.stop-download-btn').forEach(btn => {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+                btn.title = '点击停止批量保存';
+            });
+        
+            // 6. 依次处理每个作者
+            for (let i = 0; i < uids.length; i++) {
+                const uid = uids[i];
+                        
+                // ✅ UI 日志
+                logToUI('info', `📥 开始保存第 ${i + 1}/${uids.length} 个作者: ${uid}`);
+                this._showStatusMessage('followingStatus', `🚀 正在获取作者 ${i + 1}/${uids.length} 的作品...`, '#1890ff');
+        
+                // 7. 获取作者信息
+                const author = this.app.followingManager.allAuthors.find(a => a.uid === uid);
+                if (!author) {
+                    logger.warn(`⚠️ 未找到作者: ${uid}，跳过`);
+                    logToUI('warning', `⚠️ 未找到作者 ${uid}，跳过`);
+                    continue;
+                }
+        
+                // 8. 获取 platformId
+                const platformId = author.platformId;
+                        
+                if (!platformId) {
+                    logger.error(`❌ 作者 ${uid} 缺少 platformId，跳过`);
+                    logToUI('error', `❌ 作者 ${author.nickname || uid} 数据不完整，跳过`);
+                    continue;
+                }
+        
+                // ✅ 9. 查找作者卡片中的下载按钮
+                const authorCard = document.querySelector(`.author-item[data-uid="${uid}"]`);
+                const downloadBtn = authorCard ? authorCard.querySelector('.download-btn') : null;
+                    
+                if (!downloadBtn) {
+                    logger.warn(`⚠️ 未找到作者 ${uid} 的下载按钮，跳过`);
+                    logToUI('warning', `⚠️ 未找到作者 ${author.nickname || uid} 的下载按钮，跳过`);
+                    continue;
+                }
+        
+                // ✅ 10. 调用 AuthorDownloadManager 初始化状态跟踪
+                this.app.authorDownloadManager.startAuthorDownload(
+                    author.uid,
+                    platformId,
+                    author.nickname,
+                    downloadBtn  // ✅ 传递按钮DOM引用
+                );
+        
+                // 11. 发送消息到 Content Script，请求获取作者作品并发起批量下载
+                logger.info(`🚀 发送请求到 Content Script: 获取作者 ${author.nickname} (${uid}) 的所有作品`);
+                window.parent.postMessage({
+                    source: 'sidebar',
+                    type: 'DOWNLOAD_AUTHOR_WORKS',
+                    data: {
+                        uid: author.uid,
+                        platformId: platformId,
+                        nickname: author.nickname,
+                        folderPath: this.app.folderName,
+                        batchId: `${this.currentBatchId}_${uid}`  // ✅ 每个作者使用独立的 batchId
+                    }
+                }, '*');
+        
+                // ✅ 如果不是最后一个作者，添加随机延迟（防封号）
+                if (i < uids.length - 1) {
+                    const delay = Math.floor(Math.random() * 3000) + 3000; // 3-6秒随机延迟
+                    logger.info(`⏱️ 等待 ${delay}ms 后处理下一个作者（防封号机制）`);
+                    logToUI('info', `⏱️ 等待 ${delay/1000} 秒后处理下一个作者...`);
+                            
+                    // ✅ 等待延迟期间，允许用户停止
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                            
+                    // ✅ 检查是否被停止
+                    if (!this.isDownloading) {
+                        logger.info('⏹️ 用户已停止下载');
+                        logToUI('info', '⏹️ 已停止批量作者下载');
+                        break;
+                    }
+                }
+            }
+        
             // ✅ 注意：下载结果将由 message-handler.js 统一处理
-            // 调用 handleDownloadSuccess 或 handleDownloadFailed
+            // 调用 handleBatchDownloadComplete、handleBatchDownloadError 等
+        
         } catch (error) {
-            logger.error(`❌ 下载异常: ${workId}`, error);
-
-            // ✅ 更新按钮状态为异常
-            const errorMessage = error.message || (typeof error === 'string' ? error : '未知错误');
-            this._setWorkDownloadStatus(workId, 'error', errorMessage);
-
-            // ✅ 恢复下载状态标志
-            this.isDownloading = false;
-                        
-            // ✅ 根据当前激活的标签页选择对应的 Manager
-            let targetManager;
-            if (this.app.currentActiveTab === 'liked') {
-                targetManager = this.app.likedManager;
-            } else if (this.app.currentActiveTab === 'bookmarked') {
-                targetManager = this.app.bookmarkedManager;
-            } else if (this.app.currentActiveTab === 'following') {
-                targetManager = this.app.followingManager;
-            }
-                        
-            // ✅ 只更新分页控件状态，不影响其他按钮
-            if (targetManager) {
-                targetManager.updatePaginationControls();
-            }
-            
-            // ✅ 恢复必要的控制按钮
-            this.app.uiStateManager.enableFolderButton();
-            this.app.uiStateManager.enableLoadLikedButton();
-            this.app.uiStateManager.enableAllWorkDownloadButtons();
+            logger.error(`❌ 作者下载异常: ${uids}`, error);
+            logToUI('error', `❌ 保存作者作品失败: ${error.message}`);
+                    
+            // ✅ 异常时重置状态
+            this.resetDownloadState();
         }
     }
 
@@ -291,10 +359,8 @@ class DownloadHandler {
         // 批量下载时，状态由 BATCH_DOWNLOAD_COMPLETE 消息触发 resetDownloadState()
         if (!this.currentBatchId) {
             this.isDownloading = false;
-            // ✅ 只启用必要的控制按钮，不影响分页按钮状态
-            this.app.uiStateManager.enableFolderButton();
-            this.app.uiStateManager.enableLoadLikedButton();
-            this.app.uiStateManager.enableAllWorkDownloadButtons();
+            // ✅ 恢复所有控制按钮（包括 Tab 切换）
+            this.app.uiStateManager.enableAllControlButtons();
         }
     }
 
@@ -341,139 +407,33 @@ class DownloadHandler {
             // ✅ 只更新分页控件状态，不影响其他按钮
             targetManager.updatePaginationControls();
             
-            // ✅ 恢复必要的控制按钮
-            this.app.uiStateManager.enableFolderButton();
-            this.app.uiStateManager.enableLoadLikedButton();
-            this.app.uiStateManager.enableAllWorkDownloadButtons();
+            // ✅ 恢复所有控制按钮（包括 Tab 切换）
+            this.app.uiStateManager.enableAllControlButtons();
         }
     }
 
     /**
-     * 处理批量下载
-     * @param {string} listType - 列表类型：'liked' | 'bookmarked' | 'following'
+     * ✅ 核心批量下载逻辑（私有方法）
+     * 职责：发送消息到 Content Script 执行批量下载
+     * @param {Array} workIds - 作品ID列表
+     * @param {string} folderPath - 文件夹路径
+     * @param {string} batchId - 批次ID
      */
-    async handleBatchDownload(listType) {
-        logger.info(`🚀 开始批量下载: ${listType}`);
-    
-        // ✅ 调试日志：获取并输出批量选择状态
-        const batchState = this.app.batchSelectionManager.getState(listType);
-        logger.info(`📋 批量选择状态详情:`, {
-            listType: listType,
-            selectAll: batchState.selectAll,
-            selectedCount: batchState.selectedWorkIds.size,
-            selectedIds: Array.from(batchState.selectedWorkIds)
-        });
-    
-        // ✅ UI 日志：显示选中数量
-        logToUI('info', `📋 当前选中 ${batchState.selectedWorkIds.size} 个作品`);
-        if (batchState.selectAll) {
-            logToUI('info', '✅ 已启用全选模式');
-        }
-    
-        // 检查是否已选择文件夹
-        if (!this.app.folderSelected) {
-            logger.error('❌ 请先选择文件夹');
-            logToUI('error', '❌ 请先点击"选择文件夹"按钮');
-            this._showStatusMessage('folderStatus', '❌ 请先点击"选择文件夹"按钮', '#ff4d4f');
-            return;
-        }
-    
-        // ✅ 检查是否有选中作品
-        if (batchState.selectedWorkIds.size === 0) {
-            logger.warn('⚠️ 未选择任何作品');
-            logToUI('warning', '⚠️ 请先选择要保存的作品');
-            return;
-        }
-    
-        // ✅ 检查并发控制
-        if (this.isDownloading) {
-            logger.warn('⚠️ 已有下载任务在运行');
-            logToUI('warning', '⚠️ 已有保存任务在运行，请等待完成或停止后再试');
-            return;
-        }
-    
-        try {
-            // ✅ 根据 listType 获取对应的 Manager 和作品数据
-            let allWorks = [];
-            if (listType === 'liked') {
-                allWorks = this.app.likedManager.allWorks || [];
-            } else if (listType === 'bookmarked') {
-                allWorks = this.app.bookmarkedManager.allWorks || [];
-            } else if (listType === 'following') {
-                allWorks = this.app.followingManager.allWorks || [];
-            } else {
-                logger.error(`❌ 未知的列表类型: ${listType}`);
-                logToUI('error', `❌ 未知的列表类型: ${listType}`);
-                return;
-            }
-                
-            // ✅ 只提取 workId 列表，不传递完整对象
-            const selectedWorkIds = Array.from(batchState.selectedWorkIds).filter(workId => 
-                allWorks.some(work => work.workId === workId)
-            );
-                
-            if (selectedWorkIds.length === 0) {
-                logger.error('❌ 未找到选中作品的数据');
-                logToUI('error', '❌ 未找到选中作品的数据，请重新加载列表');
-                return;
-            }
-    
-            logger.info(`✅ 获取到 ${selectedWorkIds.length} 个作品的 ID`);
-            logToUI('info', `✅ 准备保存 ${selectedWorkIds.length} 个作品`);
-    
-            // ✅ 设置下载状态
-            this.isDownloading = true;
-            this.currentBatchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            this.currentBatchListType = listType;  // ✅ 保存当前批量下载的列表类型
-    
-            // ✅ 禁用所有控制按钮（不包括停止按钮）
-            this.app.uiStateManager.disableAllControlButtons();
-            
-            // ✅ 禁用所有作品按钮（防止并发和误操作）
-            this.app.uiStateManager.disableAllWorkDownloadButtons();
-            
-            // ✅ 启用停止下载按钮（批量下载允许中断）
-            document.querySelectorAll('.stop-download-btn').forEach(btn => {
-                btn.disabled = false;
-                btn.style.opacity = '1';
-                btn.style.cursor = 'pointer';
-                btn.title = '点击停止批量保存';
-            });
-    
-            // ✅ UI 日志
-            logToUI('success', `🚀 开始批量保存 (${selectedWorkIds.length} 个作品)`);
-            this._showStatusMessage(`${listType}Status`, `🚀 正在保存... 0/${selectedWorkIds.length}`, '#1890ff');
-            
-            // ✅ 将所有选中作品的按钮设置为"等待中"状态（无进度条）
-            selectedWorkIds.forEach(workId => {
-                this._setWorkDownloadStatus(workId, 'waiting');
-                // ✅ 同时禁用复选框（防止用户中途取消勾选）
-                this._disableWorkCheckbox(workId);
-            });
-            
-            // ✅ 发送消息到 Content Script 执行批量下载
-            logger.info(`🚀 发送批量下载请求到 Content Script: ${selectedWorkIds.length} 个作品`);
-            window.parent.postMessage({
-                source: 'sidebar',
-                type: 'BATCH_DOWNLOAD_WORKS',
-                workIds: selectedWorkIds,
-                folderPath: this.app.folderName,
-                batchId: this.currentBatchId
-            }, '*');
-    
-            // ✅ 注意：下载结果将由 message-handler.js 统一处理
-            // 调用 handleBatchDownloadComplete、handleBatchDownloadError 等
-    
-        } catch (error) {
-            logger.error('❌ 批量下载异常:', error);
-            logToUI('error', `❌ 批量保存失败: ${error.message}`);
-            this._showStatusMessage(`${listType}Status`, `❌ 失败: ${error.message}`, '#ff4d4f');
-                
-            // ✅ 异常时也要重置状态
-            this.resetDownloadState();
-        }
+    async _executeBatchDownload(workIds, folderPath, batchId) {
+        logger.info(`🚀 发送批量下载请求到 Content Script: ${workIds.length} 个作品`);
+        
+        window.parent.postMessage({
+            source: 'sidebar',
+            type: 'BATCH_DOWNLOAD_WORKS',
+            workIds: workIds,
+            folderPath: folderPath,
+            batchId: batchId
+        }, '*');
+        
+        // ✅ 注意：下载结果将由 message-handler.js 统一处理
+        // 调用 handleBatchDownloadComplete、handleBatchDownloadError 等
     }
-
+    
     /**
      * 处理停止下载
      * @param {string} listType - 列表类型：'liked' | 'bookmarked' | 'following'
@@ -635,7 +595,7 @@ class DownloadHandler {
         
         logger.info(`🔄 开始下载作品: ${workId}`);
         
-        // ✅ 将该作品的按钮设置为"下载中"状态（带进度条）
+        // ✅ 将该作品的按钮设置为“下载中”状态（带进度条）
         this._setWorkDownloadStatus(workId, 'downloading');
     }
 
@@ -657,7 +617,7 @@ class DownloadHandler {
         // ✅ 恢复作品按钮（pending/failed/error 状态变为可用）
         this.app.uiStateManager.enableAllWorkDownloadButtons();
         
-        // ✅ 清空批量选择状态和复选框
+        // ✅ 三个列表统一处理，都清空批量选择状态
         if (listType) {
             this.app.batchSelectionManager.clearSelection(listType);
             logger.info(`🔓 已清空 ${listType} 列表的批量选择`);

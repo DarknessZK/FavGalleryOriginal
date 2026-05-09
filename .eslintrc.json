@@ -1,0 +1,176 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true,
+    "webextensions": true
+  },
+  "extends": "eslint:recommended",
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "module"
+  },
+  "rules": {
+    // ==========================================
+    // 命名规范检查（基于 FavGallery 开发规则）
+    // ==========================================
+    
+    // 禁止使用错误的术语
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "Identifier[name=/^(videoId|awemeId)$/i]",
+        "message": "❌ 禁止使用 videoId/awemeId，请使用 workId（作品包含视频和图集）"
+      },
+      {
+        "selector": "Identifier[name=/^(userId|secUid|sec_uid)$/i]",
+        "message": "❌ 禁止使用 userId/secUid，请使用 authorUid 或 platformId"
+      },
+      {
+        "selector": "Identifier[name=/^(favId|favoriteId)$/i]",
+        "message": "❌ 禁止使用 favId/favoriteId，请使用 collectId"
+      }
+    ],
+    
+    // 禁止硬编码平台特定值
+    "no-restricted-properties": [
+      "error",
+      {
+        "object": "String",
+        "property": "DouYin",
+        "message": "❌ 禁止硬编码平台名称 'DouYin'，请使用 CONFIG.ACTIVE_PLATFORM 或 platformAPI"
+      }
+    ],
+    
+    // ==========================================
+    // 代码质量检查
+    // ==========================================
+    
+    // 强制使用驼峰命名
+    "camelcase": [
+      "warn",
+      {
+        "properties": "always",
+        "ignoreDestructuring": false
+      }
+    ],
+    
+    // 禁止未使用的变量
+    "no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    
+    // 强制使用 const/let，禁止 var
+    "no-var": "error",
+    "prefer-const": [
+      "warn",
+      {
+        "destructuring": "any",
+        "ignoreReadBeforeAssign": false
+      }
+    ],
+    
+    // ==========================================
+    // 错误处理检查
+    // ==========================================
+    
+    // 禁止空的 catch 块
+    "no-empty": [
+      "error",
+      {
+        "allowEmptyCatch": false
+      }
+    ],
+    
+    // 强制 async 函数必须有 await 或返回 Promise
+    "require-await": "warn",
+    
+    // ==========================================
+    // 最佳实践
+    // ==========================================
+    
+    // 禁止使用 eval
+    "no-eval": "error",
+    
+    // 禁止使用隐式全局变量
+    "no-implicit-globals": "error",
+    
+    // 强制使用 === 而非 ==
+    "eqeqeq": [
+      "error",
+      "always",
+      {
+        "null": "ignore"
+      }
+    ],
+    
+    // 禁止魔术数字（配置化优先）
+    "no-magic-numbers": [
+      "off",
+      {
+        "ignore": [-1, 0, 1],
+        "ignoreArrayIndexes": true,
+        "enforceConst": true
+      }
+    ],
+    
+    // ==========================================
+    // 代码风格（可选，可根据团队偏好调整）
+    // ==========================================
+    
+    // 最大行长度
+    "max-len": [
+      "warn",
+      {
+        "code": 120,
+        "ignoreUrls": true,
+        "ignoreStrings": true,
+        "ignoreTemplateLiterals": true,
+        "ignoreRegExpLiterals": true
+      }
+    ],
+    
+    // 强制使用分号
+    "semi": ["error", "always"],
+    
+    // 强制使用单引号
+    "quotes": [
+      "warn",
+      "single",
+      {
+        "avoidEscape": true,
+        "allowTemplateLiterals": true
+      }
+    ],
+    
+    // 对象字面量空格
+    "object-curly-spacing": ["warn", "always"],
+    
+    // 数组括号内空格
+    "array-bracket-spacing": ["warn", "never"]
+  },
+  "overrides": [
+    {
+      "files": ["*.config.js"],
+      "rules": {
+        "no-magic-numbers": "off"
+      }
+    },
+    {
+      "files": ["test/**/*.js", "*.test.js"],
+      "rules": {
+        "no-magic-numbers": "off"
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "node_modules/",
+    "dist/",
+    "build/",
+    "*.min.js",
+    "vendor/"
+  ]
+}
