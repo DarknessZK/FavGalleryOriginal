@@ -110,6 +110,17 @@ class RestoreManager {
                 } else {
                     logger.info(`ℹ️ 备份文件不存在: ${filePath}`);
                 }
+            } else if (dataType === 'settings') {
+                // ✅ settings 使用单个 JSON 文件
+                const filePath = `${metadataDir}/settings.json`;
+                const exists = await fileSystem.fileExists(filePath);
+
+                if (exists) {
+                    logger.info(`✅ 找到备份文件: ${filePath}`);
+                    files.push(filePath);
+                } else {
+                    logger.info(`ℹ️ 备份文件不存在: ${filePath}`);
+                }
             } else {
                 // 其他类型单个文件
                 const filePath = `${metadataDir}/${dataType}.js`;
@@ -162,6 +173,11 @@ class RestoreManager {
                 // ✅ 使用 NDJSON 工具方法解析
                 records = await fileSystem.readNDJSON(filePath);
                 logger.info(`📖 解析 NDJSON: ${records.length} 条记录`);
+            } else if (dataType === 'settings' && filePath.endsWith('.json')) {
+                // ✅ settings 格式：[{ key, value }, ...]
+                const backupData = JSON.parse(content);
+                records = Array.isArray(backupData) ? backupData : [];
+                logger.info(`📖 解析 settings JSON: ${records.length} 条记录`);
             } else if (filePath.endsWith('.js')) {
                 // ✅ JS 文件格式：variableName = `{JSON}`;
                 const data = fileSystem.deserializeData(content, dataType);

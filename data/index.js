@@ -15,6 +15,7 @@ export { FileSystem } from './storage/file-system.js';
 export * as authorsManager from './storage/authors-manager.js';
 export * as worksManager from './storage/works-manager.js';
 export * as collectsManager from './storage/collects-manager.js';
+export * as settingsManager from './storage/settings-manager.js';
 
 // Backup 模块
 export { backupManager } from './backup/backup-manager.js';

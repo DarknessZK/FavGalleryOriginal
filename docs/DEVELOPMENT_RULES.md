@@ -592,6 +592,8 @@ indexes: {
 | `BATCH_DOWNLOAD_WORKS` | `workIds`, `folderPath`, `batchId` | 批量下载 |
 | `STOP_BATCH_DOWNLOAD` | `batchId` | 停止批量下载 |
 | `SELECT_FOLDER` | - | 选择文件夹 |
+| `CHANGE_SIDEBAR_MODE` | `mode` | 切换侧边栏显示模式（hover/squeeze） |
+| `GET_SIDEBAR_MODE` | - | 获取当前侧边栏显示模式 |
 
 **示例：**
 ```javascript
@@ -627,6 +629,7 @@ window.parent.postMessage({
 | `DOWNLOAD_FAILED` | `workId`, `error` | 下载失败 |
 | `BATCH_DOWNLOAD_PROGRESS` | `batchId`, `progress` | 批量下载进度 |
 | `BATCH_DOWNLOAD_COMPLETE` | `batchId`, `result`, `stopped` | 批量下载完成 |
+| `SIDEBAR_MODE_RESPONSE` | `mode` | 返回侧边栏显示模式（hover/squeeze） |
 
 **示例：**
 ```javascript
@@ -658,7 +661,8 @@ iframe.contentWindow.postMessage({
         "collects": "def456...",
         "works_2024_Q1": "ghi789...",
         "works_2024_Q2": "jkl012...",
-        "relations": "mno345..."
+        "relations": "mno345...",
+        "settings": "pqr678..."
     }
 }
 ```
@@ -716,6 +720,7 @@ async verifyBackupIntegrity(backupData, expectedHash) {
 | `file-system.js` | 文件系统操作 | 不包含备份策略 |
 | `backup-manager.js` | 备份管理 | 不直接操作数据库 |
 | `relation-manager.js` | 关系表管理 | 不处理业务逻辑 |
+| `settings-manager.js` | 设置管理 | 不包含业务逻辑 |
 | `platform-adapter.js` | 平台适配 | 不包含 UI 逻辑 |
 | `data-fetcher.js` | 数据获取 | 不包含 UI 渲染 |
 
