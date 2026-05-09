@@ -69,6 +69,7 @@
         "data/storage/authors-manager.js",
         "data/storage/works-manager.js",
         "data/storage/collects-manager.js",
+        "data/storage/settings-manager.js",
         "data/backup/index.js",
         "data/backup/backup-manager.js",
         "data/backup/restore-manager.js",

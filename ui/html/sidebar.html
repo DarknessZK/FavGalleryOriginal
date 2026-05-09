@@ -16,7 +16,16 @@
 
     <!-- 用户信息 -->
     <div class="section">
-        <div class="section-title">👤 用户信息</div>
+        <div class="section-title header-with-toggle">
+            <span>👤 用户信息</span>
+            
+            <!-- ✅ 侧边栏模式切换开关（默认禁用，选择文件夹后启用） -->
+            <div class="mode-toggle disabled" id="sidebarModeToggle" data-mode="hover">
+                <div class="toggle-option active" data-value="hover">悬停</div>
+                <div class="toggle-option" data-value="squeeze">挤压</div>
+                <div class="toggle-slider"></div>
+            </div>
+        </div>
         <div id="userInfo">
             <div style="color: #999; font-size: 13px;">加载中...</div>
         </div>

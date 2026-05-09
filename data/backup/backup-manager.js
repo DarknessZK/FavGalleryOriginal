@@ -315,6 +315,9 @@ class BackupManager {
                 return;
             }
             
+            // ✅ settings 使用 JSON 格式（而非 .js）
+            const isSettings = tableName === 'settings';
+            
             // 获取当前数据
             const currentData = await database.getAll(tableName);
             
@@ -335,7 +338,13 @@ class BackupManager {
 
             // 有变化才写入
             logger.info(`📝 ${tableName}: 检测到变化，执行备份 (${currentData.length} 条)`);
-            await this._backupToFileSystem(tableName, { [tableName]: currentData });
+            
+            // ✅ settings 使用 JSON 格式，其他表使用 JS 格式
+            if (isSettings) {
+                await this._backupSettingsAsJSON(currentData);
+            } else {
+                await this._backupToFileSystem(tableName, { [tableName]: currentData });
+            }
 
             // 更新哈希
             if (!manifest.hashes) {
@@ -510,6 +519,33 @@ class BackupManager {
             logger.info(`💾 文件系统备份成功: ${dataType}`);
         } catch (error) {
             logger.error(`❌ 文件系统备份失败: ${dataType}`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * 备份 settings 表为 JSON 格式
+     * @param {Array} settingsData - 设置数据数组
+     * @private
+     */
+    async _backupSettingsAsJSON(settingsData) {
+        if (!fileSystem.getRootDirectoryHandle()) {
+            logger.warn('⚠️ 未设置根目录，跳过 settings 备份');
+            return;
+        }
+
+        try {
+            // ✅ 按平台分类保存为 JSON 格式
+            const platform = CONFIG.ACTIVE_PLATFORM;
+            const filePath = `${CONFIG.FILE_SYSTEM.METADATA_DIR}/${platform}/settings.json`;
+            
+            // 直接序列化为 JSON 数组
+            const content = JSON.stringify(settingsData, null, 2);
+            await fileSystem.writeTextFile(filePath, content);
+            
+            logger.info(`💾 Settings 备份成功 (${settingsData.length} 条)`);
+        } catch (error) {
+            logger.error('❌ Settings 备份失败:', error);
             throw error;
         }
     }

@@ -58,6 +58,12 @@ export class UIStateManager {
             bookmarkedSearchInput.placeholder = '搜索作品描述或作者...';
         }
         
+        // ✅ 启用侧边栏模式切换开关
+        const sidebarModeToggle = document.getElementById('sidebarModeToggle');
+        if (sidebarModeToggle) {
+            sidebarModeToggle.classList.remove('disabled');
+        }
+        
         logger.info('✅ 按钮已启用');
     }
 
@@ -185,6 +191,12 @@ export class UIStateManager {
             }
         });
         
+        // ✅ 5. 禁用侧边栏模式切换开关（防止备份冲突）
+        const sidebarModeToggle = document.getElementById('sidebarModeToggle');
+        if (sidebarModeToggle) {
+            sidebarModeToggle.classList.add('disabled');
+        }
+        
         // ✅ 注意：停止按钮的状态由调用方控制
         // - 单个作品下载：保持禁用状态（不做处理）
         // - 批量下载：需要在调用 disableAllControlButtons() 后手动启用
@@ -260,6 +272,12 @@ export class UIStateManager {
             btn.style.cursor = 'not-allowed';
             btn.title = '';
         });
+        
+        // ✅ 5. 启用侧边栏模式切换开关
+        const sidebarModeToggle = document.getElementById('sidebarModeToggle');
+        if (sidebarModeToggle) {
+            sidebarModeToggle.classList.remove('disabled');
+        }
         
         logger.info('🔓 已启用所有控制按钮（包括 Tab 切换和分页）');
     }

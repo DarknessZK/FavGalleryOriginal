@@ -103,6 +103,9 @@ class App {
         requestAnimationFrame(() => {
             this.setupContainerHeight();
         });
+        
+        // ✅ 初始化侧边栏模式切换开关
+        this.initSidebarModeToggle();
 
         logger.info('✅ 系统初始化完成，就绪');
     }
@@ -611,6 +614,78 @@ class App {
      */
     handleDownloadFailed(data) {
         this.downloadHandler.handleDownloadFailed(data);
+    }
+    
+    /**
+     * ✅ 初始化侧边栏模式切换开关
+     */
+    initSidebarModeToggle() {
+        const toggle = document.getElementById('sidebarModeToggle');
+        if (!toggle) {
+            logger.warn('⚠️ 未找到侧边栏模式切换开关');
+            return;
+        }
+        
+        // ✅ 通过 postMessage 请求 Content Script 获取设置
+        window.parent.postMessage({
+            source: 'sidebar',
+            type: 'GET_SIDEBAR_MODE'
+        }, '*');
+        
+        // ✅ 监听响应消息
+        const handleMessage = (event) => {
+            if (event.data && event.data.source === 'content' && event.data.type === 'SIDEBAR_MODE_RESPONSE') {
+                const mode = event.data.mode || 'hover';
+                logger.info(`📋 读取侧边栏模式: ${mode}`);
+                
+                // ✅ 只同步 UI 状态，不移除 disabled（等待选择文件夹后由 enableButtons() 启用）
+                this.setToggleMode(toggle, mode);
+                
+                // 移除监听器（只处理一次）
+                window.removeEventListener('message', handleMessage);
+            }
+        };
+        
+        window.addEventListener('message', handleMessage);
+        
+        const options = toggle.querySelectorAll('.toggle-option');
+        
+        // 绑定点击事件
+        options.forEach(option => {
+            option.addEventListener('click', () => {
+                const value = option.dataset.value;
+                
+                // 更新 UI
+                this.setToggleMode(toggle, value);
+                
+                // 通知 Content Script
+                window.parent.postMessage({
+                    source: 'sidebar',
+                    type: 'CHANGE_SIDEBAR_MODE',
+                    mode: value
+                }, '*');
+                
+                logger.info(`✅ 侧边栏模式已切换为: ${value === 'hover' ? '悬停' : '挤压'}`);
+            });
+        });
+    }
+    
+    /**
+     * ✅ 设置开关状态
+     * @param {HTMLElement} toggle - 开关元素
+     * @param {string} mode - 模式 ('hover' | 'squeeze')
+     */
+    setToggleMode(toggle, mode) {
+        toggle.setAttribute('data-mode', mode);
+        
+        const options = toggle.querySelectorAll('.toggle-option');
+        options.forEach(opt => {
+            if (opt.dataset.value === mode) {
+                opt.classList.add('active');
+            } else {
+                opt.classList.remove('active');
+            }
+        });
     }
 }
 

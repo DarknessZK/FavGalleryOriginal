@@ -18,6 +18,7 @@
 │   │   │   ├── liked_group_base.js      ← 点赞分组数据
 │   │   │   ├── relations_base.js        ← 关系数据
 │   │   │   ├── completed_works_base.js  ← 已完成作品数据
+│   │   │   ├── settings.json            ← 系统设置（JSON格式）
 │   │   │   ├── following_status.js      ← 关注状态缓存
 │   │   │   ├── liked_works.js           ← 点赞作品缓存
 │   │   │   ├── bookmarked_works.js      ← 收藏作品缓存
@@ -114,7 +115,22 @@
   - 由 `backup-manager.js` 定时备份（每 10 分钟）
   - 由 `file-system.js` 即时备份（保存数据时立即备份）
 
-#### 1.3 缓存文件
+#### 1.3 设置文件（`settings.json`）
+- **用途**：存储系统设置项（如侧边栏显示模式等）
+- **格式**：JSON 数组，每条记录包含 `key` 和 `value`
+- **示例**：
+  ```json
+  [
+    { "key": "sidebar_mode", "value": "hover" },
+    { "key": "theme", "value": "dark" }
+  ]
+  ```
+- **特点**：
+  - 由 `settings-manager.js` 管理
+  - 修改后立即触发增量备份
+  - 恢复时通过 `restore-manager.js` 处理
+
+#### 1.4 缓存文件
 - **文件列表**：
   - `following_status.js` - 关注状态缓存
   - `liked_works.js` - 点赞作品缓存

@@ -45,13 +45,17 @@ class ContentScript {
     /**
      * 注入侧边栏到页面
      */
-    injectSidebar() {
+    async injectSidebar() {
         if (this.injected) {
             logger.warn('侧边栏已注入，跳过');
             return;
         }
         
         logger.info('开始注入侧边栏...');
+        
+        // ✅ 读取用户设置的侧边栏模式
+        this.sidebarMode = await this.loadSidebarMode();
+        logger.info(`📋 侧边栏模式: ${this.sidebarMode}`);
         
         // ✅ 通过 platformAPI 判断当前是否为主页（跨平台架构）
         const isHomePage = platformAPI.isHomePage();
@@ -125,11 +129,13 @@ class ContentScript {
             this.toggleSidebar(iframe, container, toggleBtn);
         });
         
-        // 调整页面布局
-        const root = document.querySelector('#root');
-        if (root) {
-            root.style.marginLeft = initialWidth;
-            root.style.transition = `margin-left ${sidebarConfig.TRANSITION_DURATION}s`;
+        // ✅ 根据模式调整页面布局（挤压模式才调整）
+        if (this.sidebarMode === 'squeeze') {
+            const root = document.querySelector('#root');
+            if (root) {
+                root.style.marginLeft = initialWidth;
+                root.style.transition = `margin-left ${sidebarConfig.TRANSITION_DURATION}s`;
+            }
         }
         
         this.injected = true;
@@ -160,7 +166,7 @@ class ContentScript {
     toggleSidebar(iframe, container, toggleBtn) {
         const root = document.querySelector('#root');
 
-        if (!container || !toggleBtn || !root) return;
+        if (!container || !toggleBtn) return;
 
         this.isCollapsed = !this.isCollapsed;
         
@@ -174,7 +180,12 @@ class ContentScript {
             toggleBtn.style.left = collapsedWidth;
             toggleBtn.innerHTML = '▶';
             toggleBtn.title = '展开侧边栏';
-            root.style.marginLeft = collapsedWidth;
+            
+            // ✅ 挤压模式才调整页面布局
+            if (this.sidebarMode === 'squeeze' && root) {
+                root.style.marginLeft = collapsedWidth;
+            }
+            
             logger.info('✅ 侧边栏已收起');
         } else {
             iframe.style.width = expandedWidth;
@@ -182,7 +193,12 @@ class ContentScript {
             toggleBtn.style.left = expandedWidth;
             toggleBtn.innerHTML = '◀';
             toggleBtn.title = '收起侧边栏';
-            root.style.marginLeft = expandedWidth;
+            
+            // ✅ 挤压模式才调整页面布局
+            if (this.sidebarMode === 'squeeze' && root) {
+                root.style.marginLeft = expandedWidth;
+            }
+            
             logger.info('✅ 侧边栏已展开');
         }
     }
@@ -279,6 +295,18 @@ class ContentScript {
             case 'UPDATE_AUTHOR_DOWNLOAD_STATUS':
                 logger.info(`📝 收到更新作者下载状态: ${event.data.uid} -> ${event.data.status}`);
                 await this.handleUpdateAuthorDownloadStatus(event.data, iframe);
+                break;
+            
+            // ✅ 处理侧边栏模式切换
+            case 'CHANGE_SIDEBAR_MODE':
+                logger.info(`🔄 收到侧边栏模式切换请求: ${event.data.mode}`);
+                await this.handleChangeSidebarMode(event.data, iframe);
+                break;
+            
+            // ✅ 处理获取侧边栏模式请求
+            case 'GET_SIDEBAR_MODE':
+                logger.info('📋 收到获取侧边栏模式请求');
+                await this.handleGetSidebarMode(iframe);
                 break;
                 
             default:
@@ -910,7 +938,8 @@ class ContentScript {
                     'liked_group',
                     'author_groups',
                     'relations',
-                    'completed_works'
+                    'completed_works',
+                    'settings'  // ✅ 添加 settings 表恢复
                 ];
     
                 let restoredCount = 0;
@@ -1039,6 +1068,88 @@ class ContentScript {
             logger.info(`✅ 作者状态已更新: ${uid} -> ${status} (${downloadedCount}/${totalCount})`);
         } catch (error) {
             logger.error('❌ 更新作者状态失败:', error);
+        }
+    }
+    
+    /**
+     * ✅ 加载侧边栏模式设置
+     * @returns {Promise<string>} 'hover' | 'squeeze'
+     */
+    async loadSidebarMode() {
+        try {
+            const { getSetting } = await import('../data/storage/settings-manager.js');
+            const mode = await getSetting('sidebar_mode', 'hover');
+            return mode;
+        } catch (error) {
+            logger.warn('⚠️ 加载侧边栏模式失败，使用默认值 hover:', error.message);
+            return 'hover';
+        }
+    }
+    
+    /**
+     * ✅ 处理侧边栏模式切换
+     */
+    async handleChangeSidebarMode(data, iframe) {
+        const { mode } = data;
+        
+        try {
+            logger.info(`🔄 切换侧边栏模式: ${this.sidebarMode} -> ${mode}`);
+            
+            // 保存设置
+            const { setSetting } = await import('../data/storage/settings-manager.js');
+            await setSetting('sidebar_mode', mode);
+            
+            // 更新内存中的模式
+            this.sidebarMode = mode;
+            
+            // ✅ 重新应用布局
+            const root = document.querySelector('#root');
+            const sidebarConfig = CONFIG.UI_CONFIG.SIDEBAR;
+            const currentWidth = this.isCollapsed ? `${sidebarConfig.COLLAPSED_WIDTH}px` : `${sidebarConfig.WIDTH}px`;
+            
+            if (mode === 'squeeze') {
+                // 挤压模式：调整页面布局
+                if (root) {
+                    root.style.marginLeft = currentWidth;
+                }
+            } else {
+                // 悬停模式：移除页面布局调整
+                if (root) {
+                    root.style.marginLeft = '0';
+                }
+            }
+            
+            logger.info(`✅ 侧边栏模式已切换为: ${mode}`);
+        } catch (error) {
+            logger.error('❌ 切换侧边栏模式失败:', error);
+        }
+    }
+    
+    /**
+     * ✅ 处理获取侧边栏模式请求
+     */
+    async handleGetSidebarMode(iframe) {
+        try {
+            const { getSetting } = await import('../data/storage/settings-manager.js');
+            const mode = await getSetting('sidebar_mode', 'hover');
+            
+            logger.info(`📋 返回侧边栏模式: ${mode}`);
+            
+            // 发送响应到 Sidebar
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'SIDEBAR_MODE_RESPONSE',
+                mode: mode
+            }, '*');
+        } catch (error) {
+            logger.error('❌ 获取侧边栏模式失败:', error);
+            
+            // 发送默认值
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'SIDEBAR_MODE_RESPONSE',
+                mode: 'hover'
+            }, '*');
         }
     }
 }
