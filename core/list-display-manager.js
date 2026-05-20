@@ -41,7 +41,7 @@ class ListDisplayManager {
         window.parent.postMessage({
             source: 'sidebar',
             type: 'LOAD_LIKED_WORKS',
-            maxCount: CONFIG.FETCH_CONFIG.LIST_DEFAULTS.LIKED
+            maxCount: CONFIG.FETCH_CONFIG.LIST_CONFIGS.liked.maxCount
         }, '*');
     }
 
@@ -230,7 +230,13 @@ class ListDisplayManager {
     /**
      * ✅ 处理收藏作品列表加载进度
      */
-    handleCollectWorksProgress(currentCount, totalCount, bookmarkedManager) {
+    handleCollectWorksProgress(collectName, currentCount, totalCount, bookmarkedManager) {
+        // ✅ UI 日志（显示收藏夹名称）
+        const progressMsg = `📂 正在加载${collectName || '收藏'}作品... (已加载 ${currentCount} 个)`;
+        logToUI('info', progressMsg);
+        logger.info(progressMsg);
+        
+        // ✅ 显示进度条（与点赞列表保持一致）
         this.handleListProgress(currentCount, totalCount, bookmarkedManager);
     }
 
@@ -314,7 +320,7 @@ class ListDisplayManager {
         window.parent.postMessage({
             source: 'sidebar',
             type: 'LOAD_FOLLOWING_AUTHORS',
-            maxCount: CONFIG.FETCH_CONFIG.LIST_DEFAULTS.FOLLOWING
+            maxCount: CONFIG.FETCH_CONFIG.LIST_CONFIGS.following.maxCount
         }, '*');
     }
     
@@ -333,8 +339,19 @@ class ListDisplayManager {
         // 初始化 DOM 元素
         followingManager.initElements();
         
-        // ✅ 渲染列表
-        followingManager.updateUI();
+        // ✅ 获取当前页的选中状态，传递给 updateUI
+        const currentPageItems = followingManager.getCurrentPageData();
+        const selectedIds = currentPageItems
+            .filter(author => this.app.batchSelectionManager.state.following.selectedAuthorIds.has(author.uid))
+            .map(author => author.uid);
+        logger.info(`🔍 初始渲染同步 checkbox: 当前页 ${currentPageItems.length} 个作者, 选中 ${selectedIds.length} 个`);
+        
+        // ✅ 在渲染时直接传递选中状态，消除闪烁
+        followingManager.updateUI(new Set(selectedIds));
+        
+        if (selectedIds.length > 0) {
+            logger.info(`✅ 恢复了 ${selectedIds.length} 个作者的选中状态`);
+        }
         
         // ✅ 标记列表区域有数据，扩展到300px
         const listSection = document.querySelector('.container > .section:nth-child(4)');
@@ -363,6 +380,10 @@ class ListDisplayManager {
         
         // ✅ UI 日志
         logToUI('info', `📈 加载进度: ${currentCount}/${totalCount}`);
+        
+        // ✅ 显示进度条（与点赞/收藏列表保持一致）
+        followingManager.initElements();
+        followingManager.showProgress(currentCount, totalCount);
     }
     
     /**

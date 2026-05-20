@@ -4,6 +4,7 @@
 // ==========================================
 
 import { createLogger, logToUI } from '../utils/logger.js';
+import { CONFIG } from '../config/constants.js';
 
 const logger = createLogger('DownloadHandler');
 
@@ -36,6 +37,9 @@ class DownloadHandler {
         this.app.uiStateManager.disableAllControlButtons();
         this.app.uiStateManager.disableAllWorkDownloadButtons();
         
+        // ✅ 启用停止下载按钮
+        this.app.uiStateManager.enableStopDownloadButton();
+        
         // 调用核心下载逻辑
         await this._executeBatchDownload(workIds, this.app.folderName, this.currentBatchId);
     }
@@ -58,6 +62,9 @@ class DownloadHandler {
         // 禁用按钮
         this.app.uiStateManager.disableAllControlButtons();
         this.app.uiStateManager.disableAllWorkDownloadButtons();
+        
+        // ✅ 启用停止下载按钮
+        this.app.uiStateManager.enableStopDownloadButton();
         
         // 调用核心下载逻辑
         await this._executeBatchDownload(workIds, this.app.folderName, this.currentBatchId);
@@ -96,12 +103,7 @@ class DownloadHandler {
             this.app.uiStateManager.disableAllWorkDownloadButtons();
         
             // 5. 启用停止下载按钮
-            document.querySelectorAll('.stop-download-btn').forEach(btn => {
-                btn.disabled = false;
-                btn.style.opacity = '1';
-                btn.style.cursor = 'pointer';
-                btn.title = '点击停止批量保存';
-            });
+            this.app.uiStateManager.enableStopDownloadButton();
         
             // 6. 依次处理每个作者
             for (let i = 0; i < uids.length; i++) {
@@ -151,18 +153,18 @@ class DownloadHandler {
                 window.parent.postMessage({
                     source: 'sidebar',
                     type: 'DOWNLOAD_AUTHOR_WORKS',
-                    data: {
-                        uid: author.uid,
-                        platformId: platformId,
-                        nickname: author.nickname,
-                        folderPath: this.app.folderName,
-                        batchId: `${this.currentBatchId}_${uid}`  // ✅ 每个作者使用独立的 batchId
-                    }
+                    uid: author.uid,
+                    platformId: platformId,
+                    nickname: author.nickname,
+                    folderPath: this.app.folderName,
+                    batchId: `${this.currentBatchId}_${uid}`  // ✅ 每个作者使用独立的 batchId
                 }, '*');
         
                 // ✅ 如果不是最后一个作者，添加随机延迟（防封号）
                 if (i < uids.length - 1) {
-                    const delay = Math.floor(Math.random() * 3000) + 3000; // 3-6秒随机延迟
+                    const minDelay = CONFIG.DOWNLOAD_CONFIG.group.minDelay;
+                    const maxDelay = CONFIG.DOWNLOAD_CONFIG.group.maxDelay;
+                    const delay = Math.floor(Math.random() * (maxDelay - minDelay)) + minDelay;
                     logger.info(`⏱️ 等待 ${delay}ms 后处理下一个作者（防封号机制）`);
                     logToUI('info', `⏱️ 等待 ${delay/1000} 秒后处理下一个作者...`);
                             
@@ -182,6 +184,8 @@ class DownloadHandler {
             // 调用 handleBatchDownloadComplete、handleBatchDownloadError 等
         
         } catch (error) {
+            console.log('[DEBUG] handleAuthorDownload caught error:', error);
+            console.trace('[DEBUG] error stack trace');
             logger.error(`❌ 作者下载异常: ${uids}`, error);
             logToUI('error', `❌ 保存作者作品失败: ${error.message}`);
                     
@@ -440,6 +444,11 @@ class DownloadHandler {
      */
     async handleStopDownload(listType) {
         logger.info(`⏹️ 停止下载: ${listType}`);
+        logger.info(`📊 当前下载状态:`, {
+            isDownloading: this.isDownloading,
+            currentBatchId: this.currentBatchId,
+            currentBatchListType: this.currentBatchListType
+        });
 
         // ✅ 检查是否有正在运行的批量下载任务
         if (!this.isDownloading || !this.currentBatchId) {
@@ -450,12 +459,7 @@ class DownloadHandler {
 
         try {
             // ✅ 立即禁用停止按钮（防止重复点击）
-            document.querySelectorAll('.stop-download-btn').forEach(btn => {
-                btn.disabled = true;
-                btn.style.opacity = '0.5';
-                btn.style.cursor = 'not-allowed';
-                btn.title = '正在停止...';
-            });
+            this.app.uiStateManager.disableStopDownloadButton();
 
             // ✅ UI 日志
             logToUI('info', '⏹️ 已发送停止请求，等待当前任务完成...');

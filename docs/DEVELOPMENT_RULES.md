@@ -68,7 +68,7 @@
 |------|------|------|---------|
 | **UI层** | `ui/` | 用户界面展示和交互逻辑 | `sidebar.html`, `tab-manager.js`, `ui-state-manager.js` |
 | **核心业务层** | `core/` | 业务流程控制和消息分发 | `app.js`, `message-handler.js`, `*-manager.js` |
-| **Content Script层** | `content/` | 页面中执行数据获取和业务逻辑 | `main.js`, `services/data-fetcher.js` |
+| **Content Script层** | `content/` | 页面中执行数据获取和业务逻辑 | `main.js`, `services/data-fetcher.js`, `services/list-config-factory.js` |
 | **数据层** | `data/` | 数据持久化和备份 | `database.js`, `file-system.js`, `backup-manager.js` |
 | **API适配层** | `api/` | 平台特定的API调用和数据标准化 | `platform-adapter.js`, `douyin/api.js` |
 | **配置层** | `config/` | 全局常量配置 | `constants.js` |
@@ -129,28 +129,67 @@
 
 **实施规则：**
 
-1. **统一的配置结构**
+1. **配置与实现分离（工厂模式）**
+   
+   - **纯数据配置**：存储在 `config/constants.js` 中，只包含静态配置（maxCount、relations、messages等）
+   - **工厂类组装**：`content/services/list-config-factory.js` 负责将配置与方法动态组装
+   - **使用方透明**：`data-fetcher.js` 通过工厂获取完整配置，不关心平台差异
+
    ```javascript
-   // data-fetcher.js 中的 listConfigs
-   const listConfigs = {
+   // ✅ constants.js - 纯数据配置
+   CONFIG.FETCH_CONFIG.LIST_CONFIGS = {
        liked: {
-           apiFetch: () => platformAPI.getLikedWorks(),
-           cacheLoad: () => database.getAll('liked_group'),
-           cacheSave: (data) => database.save('liked_group', data),
-           messages: { 
-               loading: '正在加载点赞列表...',
-               complete: '点赞列表加载完成'
-           },
-           relations: { groupType: 'liked_group' },
-           defaults: { maxCount: 100 }
+           maxCount: 100,
+           folderRequired: true,
+           relations: { groupType: 'liked_group', groupId: 'liked' },
+           messages: { loaded: 'LIKED_WORKS_LOADED', ... }
        },
-       bookmarked: { /* 类似配置 */ },
-       following: { /* 类似配置 */ },
-       collects: { /* 类似配置 */ }
+       // ...
    };
+   
+   // ✅ list-config-factory.js - 工厂组装
+   class ListConfigFactory {
+       static createConfig(listType) {
+           const baseConfig = CONFIG.FETCH_CONFIG.LIST_CONFIGS[listType];
+           return {
+               ...baseConfig,
+               apiFetch: (params) => platformAPI.getLikedWorks(...),
+               cacheLoad: (fs) => worksManager.loadLikedWorks(fs),
+               cacheSave: (fs, data) => worksManager.saveLikedWorks(fs, data)
+           };
+       }
+   }
+   
+   // ✅ data-fetcher.js - 使用工厂
+   this.listConfigs = ListConfigFactory.createAllConfigs({ backupManager });
    ```
 
-2. **统一的加载方法**
+2. **跨平台适配**
+   
+   工厂模式支持根据不同平台注入不同的实现：
+   
+   ```javascript
+   // ✅ 工厂支持多平台
+   static createConfig(listType, platform = CONFIG.ACTIVE_PLATFORM) {
+       const baseConfig = CONFIG.FETCH_CONFIG.LIST_CONFIGS[listType];
+       
+       if (platform === 'douyin') {
+           return {
+               ...baseConfig,
+               apiFetch: (params) => douyinAPI.getLikedWorks(...),
+               cacheLoad: (fs) => worksManager.loadLikedWorks(fs)
+           };
+       } else if (platform === 'xiaohongshu') {
+           return {
+               ...baseConfig,
+               apiFetch: (params) => xiaohongshuAPI.getLikedWorks(...),
+               cacheLoad: (fs) => xiaohongshuWorksManager.loadLikedWorks(fs)
+           };
+       }
+   }
+   ```
+
+3. **统一的加载方法**
    ```javascript
    // ✅ 正确：复用同一个 _loadListInternal 方法
    async _loadListInternal(listType) {
@@ -180,7 +219,7 @@
    }
    ```
 
-3. **禁止为每个列表写特殊逻辑**
+4. **禁止为每个列表写特殊逻辑**
    ```javascript
    // ❌ 错误：为每个列表写独立方法
    async loadLikedWorks() { /* ... */ }
@@ -547,7 +586,7 @@ indexes: {
 │   ├── metadata/
 │   │   └── douyin/           # 按平台分类
 │   │       ├── manifest.json # 备份清单（含哈希值）
-│   │       ├── authors_base.js
+│   │       ├── authors.js
 │   │       └── works/
 │   │           ├── works_2024_Q1.json.gz
 │   │           └── works_2024_Q2.json.gz
@@ -587,11 +626,16 @@ indexes: {
 | 消息类型 | 必需字段 | 说明 |
 |---------|---------|------|
 | `LOAD_LIKED_WORKS` | `maxCount` | 加载点赞列表 |
+| `LOAD_COLLECTS_LIST` | - | 加载收藏夹列表 |
 | `LOAD_COLLECT_WORKS` | `collectIds` | 加载收藏夹作品 |
+| `LOAD_FOLLOWING_AUTHORS` | `maxCount` | 加载关注作者列表 |
 | `DOWNLOAD_WORK_BY_ID` | `workId`, `folderPath` | 下载单个作品 |
+| `DOWNLOAD_AUTHOR_WORKS` | `uid`, `platformId`, `nickname`, `folderPath`, `batchId` | 下载作者所有作品 |
 | `BATCH_DOWNLOAD_WORKS` | `workIds`, `folderPath`, `batchId` | 批量下载 |
 | `STOP_BATCH_DOWNLOAD` | `batchId` | 停止批量下载 |
 | `SELECT_FOLDER` | - | 选择文件夹 |
+| `GET_USER_INFO` | - | 获取用户信息 |
+| `GET_DOWNLOADED_WORK_IDS` | - | 查询已下载作品ID |
 | `CHANGE_SIDEBAR_MODE` | `mode` | 切换侧边栏显示模式（hover/squeeze） |
 | `GET_SIDEBAR_MODE` | - | 获取当前侧边栏显示模式 |
 
@@ -624,12 +668,24 @@ window.parent.postMessage({
 | 消息类型 | 必需字段 | 说明 |
 |---------|---------|------|
 | `LIKED_WORKS_LOADED` | `works`, `total` | 点赞列表加载完成 |
-| `COLLECT_WORKS_LOADED` | `works`, `total` | 收藏列表加载完成 |
+| `BOOKMARKED_WORKS_LOADED` | `works`, `total` | 收藏列表加载完成 |
+| `FOLLOWING_AUTHORS_LOADED` | `authors`, `total` | 关注作者列表加载完成 |
+| `COLLECTS_LIST_LOADED` | `collects`, `total` | 收藏夹列表加载完成 |
+| `COLLECT_WORKS_LOADED` | `works`, `total`, `collectIds` | 收藏夹作品加载完成 |
+| `COLLECT_WORKS_ERROR` | `error` | 收藏夹作品加载错误 |
 | `DOWNLOAD_SUCCESS` | `workId`, `result` | 下载成功 |
 | `DOWNLOAD_FAILED` | `workId`, `error` | 下载失败 |
+| `BATCH_DOWNLOAD_ITEM_START` | `workId` | 批量下载单个项目开始 |
 | `BATCH_DOWNLOAD_PROGRESS` | `batchId`, `progress` | 批量下载进度 |
 | `BATCH_DOWNLOAD_COMPLETE` | `batchId`, `result`, `stopped` | 批量下载完成 |
+| `BATCH_DOWNLOAD_ERROR` | `batchId`, `error` | 批量下载错误 |
+| `AUTHOR_WORKS_COUNT` | `uid`, `count` | 作者作品数量统计 |
+| `AUTHOR_WORK_PROGRESS` | `uid`, `workId`, `status` | 作者作品下载进度 |
+| `AUTHOR_DOWNLOAD_COMPLETED` | `uid` | 作者下载完成，禁用复选框 |
+| `DB_RESPONSE_GET_DOWNLOADED_WORK_IDS` | `workIds` | 数据库查询响应 |
+| `USER_INFO` | `userInfo` | 用户信息返回 |
 | `SIDEBAR_MODE_RESPONSE` | `mode` | 返回侧边栏显示模式（hover/squeeze） |
+| `UI_LOG` | `level`, `message` | UI日志同步 |
 
 **示例：**
 ```javascript
@@ -723,6 +779,7 @@ async verifyBackupIntegrity(backupData, expectedHash) {
 | `settings-manager.js` | 设置管理 | 不包含业务逻辑 |
 | `platform-adapter.js` | 平台适配 | 不包含 UI 逻辑 |
 | `data-fetcher.js` | 数据获取 | 不包含 UI 渲染 |
+| `list-config-factory.js` | 列表配置工厂 | 不包含业务逻辑，只负责组装配置和方法 |
 
 ---
 

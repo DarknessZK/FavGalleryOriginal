@@ -22,6 +22,17 @@
 - 数据关系模型设计
 - 字段命名规范和枚举值定义
 
+**当前数据表列表（9张）：**
+1. works - 作品元数据
+2. relations - 通用关系表
+3. authors - 作者列表
+4. collects - 收藏夹列表
+5. completed_works - 已完成下载
+6. liked_group - 点赞分组元数据
+7. author_groups - 作者分组元数据
+8. collect_groups - 收藏夹分组元数据
+9. settings - 系统配置
+
 ### 1.2 适用范围
 
 - 适用于 FavGallery v1.0 及后续版本
@@ -70,7 +81,7 @@ IndexedDB (主存储)
 
 **数据库名称：** FavGallery  
 **数据库版本：** 1  
-**对象存储数量：** 8 张表
+**对象存储数量：** 9 张表
 
 ---
 
@@ -403,7 +414,45 @@ authorCount: 234
 
 ---
 
-### 表 8：settings（系统配置）
+### 表 8：collect_groups（收藏夹分组元数据）
+
+**用途：** 存储用户自定义的收藏夹分组信息
+
+**主键：** groupId（字符串）
+
+**字段定义：**
+
+| 字段名 | 类型 | 必填 | 说明 |
+|--------|------|------|------|
+| groupId | string | 是 | 分组ID（主键） |
+| groupName | string | 是 | 分组名称 |
+| description | string | 否 | 分组描述 |
+| sortOrder | number | 是 | 排序顺序（默认 0） |
+| isDeleted | boolean | 是 | 软删除标记（默认 false） |
+| collectCount | number | 是 | 收藏夹数量（缓存字段） |
+
+**示例数据：**
+```
+{
+    groupId: "DouYin_collects",
+    groupName: "默认分组",
+    description: "",
+    sortOrder: 0,
+    isDeleted: false,
+    collectCount: 5
+}
+```
+
+**设计说明：**
+- groupId 采用 `平台_分组ID` 格式（如 `DouYin_following`），支持多平台扩展
+- collectCount 为缓存字段，通过 relations 表统计更新
+- sortOrder 支持用户自定义排序
+- isDeleted 支持软删除，删除分组时不物理删除记录
+- 参照 author_groups 设计，用于管理收藏夹分组
+
+---
+
+### 表 9：settings（系统配置）
 
 **用途：** 存储用户自定义的系统配置（键值对存储）
 
@@ -447,6 +496,7 @@ value: "dark"
 | collect | 收藏夹 | 作品在收藏夹中 |
 | liked_group | 点赞分组 | 作品在点赞列表中 |
 | author_group | 作者分组 | 作者在关注分组中 |
+| collect_group | 收藏夹分组 | 收藏夹在分组中 |
 
 ### 4.3 mediaType（媒体类型）
 
@@ -523,6 +573,98 @@ const collectIds = relations
 
 ---
 
+### 5.4 各业务场景数据表使用说明
+
+#### **关注列表（following）**
+
+| 操作 | 使用的数据表 | 环节说明 |
+|------|------------|----------|
+| 刷新列表 | authors, author_groups, relations | 保存作者元数据，创建默认分组，建立 author→author_group 关系 |
+| 单个作者下载 | completed_works, works, relations | 查询已下载作品，保存作品元数据，建立 work→author 关系，标记完成 |
+| 批量下载（多个作者） | completed_works, works, relations | 同单个下载，循环处理多个作者 |
+
+**详细说明：**
+
+1. **刷新列表**
+   - `authors` 表：保存作者基本信息（uid、昵称、头像等）
+   - `author_groups` 表：创建或更新默认分组（如 `douyin_following`）
+   - `relations` 表：建立 `author → author_group` 关系，将作者归属到分组
+
+2. **单个/批量作者下载**
+   - `completed_works` 表（读）：查询该作者已下载的作品ID，实现断点续传
+   - `works` 表：保存获取到的作品元数据
+   - `relations` 表：建立 `work → author` 关系，记录作品归属
+   - `completed_works` 表（写）：每个作品下载成功后标记为已完成
+
+---
+
+#### **点赞列表（liked）**
+
+| 操作 | 使用的数据表 | 环节说明 |
+|------|------------|----------|
+| 刷新列表 | works, liked_group, relations | 保存作品元数据，创建默认分组，建立 work→liked_group 关系 |
+| 单个/批量下载 | completed_works | 查询已下载 + 标记完成 |
+
+**详细说明：**
+
+1. **刷新列表**
+   - `works` 表：保存点赞作品的元数据
+   - `liked_group` 表：创建或更新默认分组（固定为 `liked`）
+   - `relations` 表：建立 `work → liked_group` 关系，将作品归属到点赞列表
+
+2. **单个/批量下载**
+   - `completed_works` 表（读）：查询已下载的作品ID，跳过重复下载
+   - `completed_works` 表（写）：下载成功后记录文件路径、大小等信息
+
+---
+
+#### **收藏列表（bookmarked）**
+
+| 操作 | 使用的数据表 | 环节说明 |
+|------|------------|----------|
+| 刷新列表（加载收藏夹） | collects, collect_groups, relations | 保存收藏夹元数据，创建默认分组，建立 collect→collect_group 关系 |
+| 选中收藏夹加载作品 | works, relations | 保存作品元数据，建立 work→collect 关系 |
+| 单个/批量下载 | completed_works | 查询已下载 + 标记完成 |
+
+**详细说明：**
+
+1. **刷新列表（加载收藏夹元数据）**
+   - `collects` 表：保存收藏夹基本信息（collectId、名称、作品数等）
+   - `collect_groups` 表：创建或更新默认分组（如 `douyin_collects`）
+   - `relations` 表：建立 `collect → collect_group` 关系，将收藏夹归属到分组
+
+2. **选中收藏夹加载作品**
+   - `works` 表：保存该收藏夹内作品的元数据
+   - `relations` 表：建立 `work → collect` 关系，记录作品属于哪个收藏夹
+
+3. **单个/批量下载**
+   - `completed_works` 表（读）：查询已下载的作品ID，跳过重复下载
+   - `completed_works` 表（写）：下载成功后记录文件路径、大小等信息
+
+---
+
+### 5.5 数据表使用总结
+
+**核心规律：**
+
+1. **刷新列表**：保存元数据 + 建立关系
+   - 关注列表：authors + author_groups + relations
+   - 点赞列表：works + liked_group + relations
+   - 收藏列表：collects + collect_groups + works + relations
+
+2. **下载操作**：只操作 completed_works 表
+   - 读取：查询已下载作品ID（断点续传）
+   - 写入：标记作品下载完成
+
+3. **关注列表特殊**：批量下载时需要额外建立 work→author 关系
+
+**注意事项：**
+- 所有列表的下载操作都只依赖 `completed_works` 表，不涉及其他表的读写
+- 关系只在列表加载时建立，下载时不修改关系
+- 软删除机制：取消关注、删除收藏夹等操作只标记 `isDeleted`，不物理删除
+
+---
+
 ## 6. 数据流转图
 
 ### 6.1 列表加载流程
@@ -583,7 +725,7 @@ gzip 压缩大表（works、relations）
 
 **初始版本，包含以下设计决策：**
 
-1. **8 张核心数据表**
+1. **9 张核心数据表**
     - works：作品元数据（嵌套结构）
     - relations：通用关系表（四字段设计）
     - authors：作者列表（含软删除）
@@ -591,6 +733,7 @@ gzip 压缩大表（works、relations）
     - completed_works：下载记录（相对路径）
     - liked_group：点赞分组元数据
     - author_groups：作者分组元数据
+    - collect_groups：收藏夹分组元数据
     - settings：系统配置（预留）
 
 2. **命名规范**
@@ -609,12 +752,17 @@ gzip 压缩大表（works、relations）
     - 包含 mediaType 和 quality 字段
 
 5. **软删除机制**
-    - authors、collects、author_groups 表添加 isDeleted 字段
+    - authors、collects、author_groups、collect_groups 表添加 isDeleted 字段
     - 取消操作时不物理删除记录
 
 6. **计数缓存**
-    - workCount、authorCount 等频繁查询的计数字段单独缓存
+    - workCount、authorCount、collectCount 等频繁查询的计数字段单独缓存
     - 通过 relations 表统计更新
+
+7. **收藏夹分组**
+    - 新增 collect_groups 表管理收藏夹分组
+    - 支持 collect → collect_group 关系
+    - 参照 author_groups 设计模式
 
 **设计原则：**
 - 最小冗余：可推导的状态不单独存储

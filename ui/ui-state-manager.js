@@ -324,6 +324,32 @@ export class UIStateManager {
     }
     
     /**
+     * ✅ 启用批量停止按钮
+     */
+    enableStopDownloadButton() {
+        document.querySelectorAll('.stop-download-btn').forEach(btn => {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+            btn.title = '点击停止批量保存';
+        });
+        logger.info('✅ 已启用批量停止按钮');
+    }
+    
+    /**
+     * ✅ 禁用批量停止按钮
+     */
+    disableStopDownloadButton() {
+        document.querySelectorAll('.stop-download-btn').forEach(btn => {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.style.cursor = 'not-allowed';
+            btn.title = '';
+        });
+        logger.info('🔒 已禁用批量停止按钮');
+    }
+    
+    /**
      * 启用所有作品卡片的下载按钮（pending/failed/error 状态）
      */
     enableAllWorkDownloadButtons() {

@@ -7,11 +7,10 @@ import { CONFIG } from '../../config/constants.js';
 import { platformAPI } from '../../api/platform-adapter.js';
 import { createLogger } from '../../utils/logger.js';
 import { fileSystem } from '../../data/storage/file-system.js';
-import * as worksManager from '../../data/storage/works-manager.js';
-import * as authorsManager from '../../data/storage/authors-manager.js';
-import * as collectsManager from '../../data/storage/collects-manager.js';
 import { backupManager } from '../../data/backup/backup-manager.js';
 import * as relationManager from '../../data/database/relation-manager.js';
+import { database } from '../../data/database/database.js';
+import { ListConfigFactory } from './list-config-factory.js';
 
 const logger = createLogger('DataFetcher');
 
@@ -19,158 +18,12 @@ export class DataFetcher {
     constructor() {
         this.folderSelected = false;
         this.fileSystem = fileSystem; // ✅ 初始化fileSystem
+        this.apiRequestCount = 0;  // ✅ API请求计数器
         
-        // ✅ 列表配置映射（配置驱动）
-        this.listConfigs = {
-            liked: {
-                // API层
-                apiFetch: (params) => platformAPI.getLikedWorks(
-                    params.maxCount,
-                    params.onProgress,
-                    params.cachedIds,
-                    params.metadata
-                ),
-                
-                // 缓存层
-                cacheLoad: (fs) => worksManager.loadLikedWorks(fs),
-                cacheSave: (fs, data) => worksManager.saveLikedWorks(fs, {
-                    works: data.works,
-                    metadata: data.metadata
-                }),
-                
-                // 消息层
-                messages: {
-                    loaded: 'LIKED_WORKS_LOADED',
-                    progress: 'LIKED_WORKS_PROGRESS',
-                    error: 'LIKED_WORKS_ERROR',
-                    clear: 'CLEAR_LIKED_LIST',
-                    start: 'LOAD_DATA_START'
-                },
-                
-                // 关系层
-                relations: {
-                    groupType: 'liked_group',
-                    groupId: 'liked'
-                },
-                
-                // 默认值
-                defaults: {
-                    maxCount: CONFIG.FETCH_CONFIG.LIST_DEFAULTS.LIKED,
-                    folderRequired: true
-                }
-            },
-            
-            bookmarked: {
-                // API层
-                apiFetch: (params) => platformAPI.getCollectWorksIncremental(
-                    params.collectId,
-                    params.maxCount,
-                    params.onProgress,
-                    params.cachedIds,
-                    params.metadata
-                ),
-                
-                // 缓存层
-                cacheLoad: (fs, extraParams) => worksManager.loadBookmarkedWorks(fs, extraParams.collectId),
-                cacheSave: (fs, data) => worksManager.saveBookmarkedWorks(fs, {
-                    works: data.works,
-                    collectId: data.collectId,
-                    metadata: data.metadata
-                }),
-                
-                // 消息层
-                messages: {
-                    loaded: 'COLLECT_WORKS_LOADED',
-                    progress: 'COLLECT_WORKS_PROGRESS',
-                    error: 'COLLECT_WORKS_ERROR',
-                    clear: 'CLEAR_BOOKMARKED_LIST',
-                    start: 'LOAD_DATA_START'
-                },
-                
-                // 关系层
-                relations: {
-                    groupType: 'collect',
-                    groupId: null  // 动态设置
-                },
-                
-                // 默认值
-                defaults: {
-                    maxCount: CONFIG.FETCH_CONFIG.LIST_DEFAULTS.BOOKMARKED,
-                    folderRequired: true
-                }
-            },
-            
-            // ✅ 关注列表配置（作者列表）
-            following: {
-                // API层 - 获取关注作者列表
-                apiFetch: (params) => platformAPI.getFollowingList(
-                    params.maxCount,
-                    params.onProgress,
-                    params.cachedIds,  // cachedUids
-                    params.metadata
-                ),
-                
-                // 缓存层 - 加载/保存作者数据
-                cacheLoad: (fs) => authorsManager.loadAuthorsBase(fs),
-                cacheSave: (fs, data) => authorsManager.saveAuthorsBase(fs, backupManager, {
-                    authors: data.authors,
-                    metadata: data.metadata
-                }),
-                
-                // 消息层
-                messages: {
-                    loaded: 'FOLLOWING_AUTHORS_LOADED',
-                    progress: 'FOLLOWING_AUTHORS_PROGRESS',
-                    error: 'FOLLOWING_AUTHORS_ERROR',
-                    clear: 'CLEAR_FOLLOWING_LIST',
-                    start: 'LOAD_DATA_START'
-                },
-                
-                // 关系层 - 建立 author -> author_group 关系
-                relations: {
-                    groupType: 'author_group',
-                    groupId: 'following'  // 默认分组ID
-                },
-                
-                // 默认值
-                defaults: {
-                    maxCount: CONFIG.FETCH_CONFIG.LIST_DEFAULTS.FOLLOWING,
-                    folderRequired: true
-                }
-            },
-            
-            // ✅ 收藏夹列表配置（元数据列表）
-            collects: {
-                // API层 - 获取收藏夹列表
-                apiFetch: (params) => platformAPI.getCollects(
-                    params.cursor || 0,
-                    params.count || CONFIG.FETCH_CONFIG.COLLECTS_LIST_MAX_COUNT
-                ),
-                
-                // 缓存层 - 加载/保存收藏夹数据
-                cacheLoad: (fs) => collectsManager.loadAllCollects(fs),
-                cacheSave: (fs, data) => collectsManager.saveCollects(fs, backupManager, data.collects),
-                
-                // 消息层
-                messages: {
-                    loaded: 'COLLECTS_LIST_LOADED',
-                    progress: 'COLLECTS_LIST_PROGRESS',  // ✅ 保留机制（虽然不会触发）
-                    error: 'COLLECTS_LIST_ERROR',
-                    clear: null,
-                    start: 'LOAD_DATA_START'
-                },
-                
-                // 关系层（无）
-                relations: null,
-                
-                // 默认值
-                defaults: {
-                    maxCount: CONFIG.FETCH_CONFIG.COLLECTS_LIST_MAX_COUNT,
-                    folderRequired: true,  // ✅ 需要文件夹
-                    skipIncrementalCheck: true  // ✅ 跳过增量检查，始终调用API以检测软删除
-                }
-            }
-        };
+        // ✅ 使用工厂创建列表配置（配置驱动 + 平台适配）
+        this.listConfigs = ListConfigFactory.createAllConfigs({
+            backupManager
+        });
     }
 
     /**
@@ -191,24 +44,18 @@ export class DataFetcher {
         
         if (mergedData) {
             const config = this.listConfigs[listType];
-            const isAuthorList = listType === 'following';
-            const isCollectsList = listType === 'collects';
             
-            // ✅ 区分不同类型的数据的消息格式
-            const messageData = {};
-            if (isCollectsList) {
-                messageData.collects = mergedData;
-            } else if (isAuthorList) {
-                messageData.authors = mergedData;
-            } else {
-                messageData.works = mergedData;
-            }
-            
-            this._sendMessage(iframe, config.messages.loaded, {
-                ...messageData,
+            // ✅ 配置驱动：根据 resultKey 确定消息字段
+            const messageData = {
+                [config.resultKey]: mergedData,
                 total: mergedData.length
-            });
+            };
+            
+            this._sendMessage(iframe, config.messages.loaded, messageData);
         }
+        
+        // ✅ 结束列表加载，处理剩余批次备份
+        this._finalizeListLoad(listType);
         
         return mergedData;
     }
@@ -223,47 +70,50 @@ export class DataFetcher {
         }
         
         // 1. 前置检查
-        if (config.defaults.folderRequired && !this.folderSelected) {
+        if (config.folderRequired && !this.folderSelected) {
             logger.error('❌ 请先选择文件夹');
             return null;
         }
         
-        // 2. 读取缓存
-        const cacheResult = await config.cacheLoad(this.fileSystem, extraParams);
+        // ✅ 如果需要创建默认分组，先检查并创建
+        if (config.needDefaultGroup) {
+            await this._ensureDefaultGroup(listType, config);
+        }
         
-        // ✅ 区分不同类型的数据
-        const isAuthorList = listType === 'following';
-        const isCollectsList = listType === 'collects';
-        const cachedItems = isAuthorList ? (cacheResult.authors || []) : 
-                           isCollectsList ? (cacheResult.collects || []) :
-                           (cacheResult.works || []);
+        // 2. 读取缓存（配置驱动）
+        const cacheResult = await config.cacheLoad(this.fileSystem, extraParams);
+        const cachedItems = cacheResult[config.resultKey] || [];
         const metadata = cacheResult.metadata || {};
         
-        logger.info(`📊 缓存中有 ${cachedItems.length} 个${isAuthorList ? '作者' : isCollectsList ? '收藏夹' : '作品'}`);
+        logger.info(`📊 缓存中有 ${cachedItems.length} 个${config.saveKey === 'collects' ? '收藏夹' : config.saveKey === 'authors' ? '作者' : '作品'}`);
         
         // 3. 检查是否需要API请求
         // ✅ 如果 skipIncrementalCheck 为 true，则始终调用 API（用于检测软删除）
-        const shouldSkipAPI = !config.defaults.skipIncrementalCheck && 
-                              cachedItems.length >= config.defaults.maxCount;
+        const shouldSkipAPI = !config.skipIncrementalCheck && 
+                              cachedItems.length >= config.maxCount;
         
         if (shouldSkipAPI) {
-            const listTypeName = isAuthorList ? '作者' : isCollectsList ? '收藏夹' : '作品';
+            const listTypeName = config.saveKey === 'collects' ? '收藏夹' : config.saveKey === 'authors' ? '作者' : '作品';
             logger.info(`⏭️ [${listTypeName}列表] 跳过 API 请求`);
-            logger.info(`   📋 原因: 缓存已有 ${cachedItems.length} 个，达到目标数量 ${config.defaults.maxCount}`);
-            logger.info(`   ⚙️ 配置: skipIncrementalCheck=${config.defaults.skipIncrementalCheck}, folderRequired=${config.defaults.folderRequired}`);
+            logger.info(`   📋 原因: 缓存已有 ${cachedItems.length} 个，达到目标数量 ${config.maxCount}`);
+            logger.info(`   ⚙️ 配置: skipIncrementalCheck=${config.skipIncrementalCheck}, folderRequired=${config.folderRequired}`);
             logger.info(`   💡 提示: 如需强制刷新，请清除缓存或重新选择文件夹`);
+            
+            // ✅ 发送加载完成消息到 Sidebar
+            if (iframe && config.messages.loaded) {
+                this._sendMessage(iframe, config.messages.loaded, {
+                    [config.resultKey]: cachedItems,
+                    total: cachedItems.length
+                });
+                logger.info(`📨 已发送 ${config.messages.loaded} 消息`);
+            }
+            
             return cachedItems;
         }
         
-        // 4. API增量获取
-        // ✅ 根据类型使用不同的ID字段
-        let cachedIds;
-        if (isCollectsList) {
-            // 收藏夹不需要传 cachedIds（API 不支持）
-            cachedIds = null;
-        } else {
-            cachedIds = cachedItems.map(item => isAuthorList ? item.uid : item.workId);
-        }
+        // 4. API增量获取（配置驱动）
+        // ✅ 收藏夹不需要传 cachedIds（API 不支持）
+        const cachedIds = config.saveKey === 'collects' ? null : cachedItems.map(item => item[config.idField]);
         
         const onProgress = (current, total) => {
             logger.info(`📈 进度: ${current}/${total}`);
@@ -278,38 +128,48 @@ export class DataFetcher {
         };
         
         const apiResult = await config.apiFetch({
-            maxCount: config.defaults.maxCount,
+            maxCount: config.maxCount,
             cachedIds,  // ✅ 收藏夹传 null
             onProgress,
             metadata,
             ...extraParams
         });
         
-        // ✅ 区分不同类型的数据
-        let apiItems;
-        if (isCollectsList) {
-            apiItems = apiResult.collects || [];
-        } else {
-            apiItems = isAuthorList ? (apiResult.authors || []) : (apiResult.works || []);
-        }
-        logger.info(`✅ API 返回 ${apiItems.length} 个${isAuthorList ? '作者' : isCollectsList ? '收藏夹' : '作品'}`);
+        // ✅ 配置驱动：根据 resultKey 获取 API 返回数据
+        const apiItems = apiResult[config.resultKey] || [];
+        logger.info(`✅ API 返回 ${apiItems.length} 个${config.saveKey === 'collects' ? '收藏夹' : config.saveKey === 'authors' ? '作者' : '作品'}`);
         
         // 5. 合并数据（支持软删除）
-        const mergedData = this._mergeItems(cachedItems, apiItems, isAuthorList, isCollectsList);
-        logger.info(`✅ 合并后共 ${mergedData.length} 个${isAuthorList ? '作者' : isCollectsList ? '收藏夹' : '作品'}`);
+        const mergedData = this._mergeItems(cachedItems, apiItems, config.idField);
+        logger.info(`✅ 合并后共 ${mergedData.length} 个${config.saveKey === 'collects' ? '收藏夹' : config.saveKey === 'authors' ? '作者' : '作品'}`);
         
-        // 6. 保存数据
+        // 6. 保存数据（配置驱动）
         await this._saveList(listType, {
             apiItems,
             mergedData,
             metadata,
             apiResult,
-            isAuthorList,
-            isCollectsList,
             ...extraParams
         });
         
         return mergedData;
+    }
+    
+    /**
+     * ✅ 结束列表加载，处理剩余批次备份
+     * @param {string} listType - 列表类型
+     */
+    _finalizeListLoad(listType) {
+        // 如果不足5次，也触发备份
+        if (this.apiRequestCount > 0 && this.apiRequestCount % 5 !== 0) {
+            logger.info(`🔄 列表加载结束，共 ${this.apiRequestCount} 次API请求，触发末次备份...`);
+            this._triggerBackup(listType).catch(err => {
+                logger.warn('⚠️ 备份失败:', err.message);
+            });
+        }
+        
+        // 重置计数器（为下次列表加载准备）
+        this.apiRequestCount = 0;
     }
 
     /**
@@ -327,59 +187,26 @@ export class DataFetcher {
         }
         
         try {
-            // 1. 保存到IndexedDB + 异步备份
-            const isAuthorList = data.isAuthorList || listType === 'following';
-            const isCollectsList = data.isCollectsList || listType === 'collects';
+            // 1. 保存到IndexedDB + 异步备份（配置驱动）
+            const saveData = {
+                [config.saveKey]: data.mergedData,
+                metadata: this._updateMetadata(data.metadata, data.apiResult),
+                ...(config.saveKey === 'works' ? data : {})  // 作品列表需要额外数据
+            };
+            await config.cacheSave(this.fileSystem, saveData);
             
-            if (isCollectsList) {
-                // ✅ 收藏夹列表保存
-                await config.cacheSave(this.fileSystem, {
-                    collects: data.mergedData,
-                    metadata: this._updateMetadata(data.metadata, data.apiResult)
-                });
-            } else if (isAuthorList) {
-                // ✅ 作者列表保存
-                await config.cacheSave(this.fileSystem, {
-                    authors: data.mergedData,
-                    metadata: this._updateMetadata(data.metadata, data.apiResult)
-                });
-            } else {
-                // 作品列表保存
-                await config.cacheSave(this.fileSystem, {
-                    works: data.mergedData,
-                    metadata: this._updateMetadata(data.metadata, data.apiResult),
-                    ...data
-                });
-            }
+            logger.info(`✅ 已保存最新列表: ${data.mergedData.length} 个${config.saveKey === 'collects' ? '收藏夹' : config.saveKey === 'authors' ? '作者' : '作品'}`);
             
-            logger.info(`✅ 已保存最新列表: ${data.mergedData.length} 个${isCollectsList ? '收藏夹' : isAuthorList ? '作者' : '作品'}`);
-            
-            // 2. 建立关系（✅ 收藏夹跳过，因为 relations 为 null）
-            if (config.relations) {
-                if (isAuthorList) {
-                    // ✅ 建立 author -> author_group 关系
-                    await this.buildAuthorGroupRelations(
-                        data.mergedData,
-                        config.relations.groupId
-                    );
-                } else {
-                    // 建立 work -> author 关系
-                    await this.buildWorkAuthorRelations(
-                        data.mergedData,
-                        listType,
-                        data.collectId
-                    );
-                }
-            } else {
-                logger.debug('ℹ️ 此列表类型不需要建立关系');
-            }
+            // 2. 建立关系（配置驱动）
+            await this._buildRelations(data.mergedData, config.relations, data.collectId);
             
             // 3. 触发备份（异步，不阻塞主流程）
-            const batchCount = Math.ceil(data.apiItems.length / 20);
+            this.apiRequestCount++;  // ✅ 每次保存时计数+1
             const BACKUP_BATCH_INTERVAL = CONFIG.BACKUP_CONFIG.listBackup?.batchInterval || 5;
             
-            if (batchCount >= BACKUP_BATCH_INTERVAL) {
-                logger.info(`🔄 已加载 ${batchCount} 批，触发备份...`);
+            // 每5次API请求触发一次备份
+            if (this.apiRequestCount % BACKUP_BATCH_INTERVAL === 0) {
+                logger.info(`🔄 第 ${this.apiRequestCount} 次API请求，触发备份...`);
                 // ✅ 异步触发备份，不等待完成
                 this._triggerBackup(listType).catch(err => {
                     logger.warn('⚠️ 备份失败:', err.message);
@@ -416,15 +243,11 @@ export class DataFetcher {
      * ✅ 合并数据（支持作品、作者和收藏夹，支持软删除）
      * @param {Array} cached - 缓存数据
      * @param {Array} api - API数据
-     * @param {boolean} isAuthorList - 是否为作者列表
-     * @param {boolean} isCollectsList - 是否为收藏夹列表
+     * @param {string} idField - ID字段名（配置驱动）
      * @returns {Array} 合并后的数据
      */
-    _mergeItems(cached, api, isAuthorList, isCollectsList) {
+    _mergeItems(cached, api, idField) {
         const itemMap = new Map();
-        
-        // ✅ 根据类型确定ID字段
-        const idField = isCollectsList ? 'collectId' : (isAuthorList ? 'uid' : 'workId');
         
         // 先加入缓存数据
         cached.forEach(item => {
@@ -472,6 +295,7 @@ export class DataFetcher {
             'authors',
             'collects',
             'author_groups',
+            'collect_groups',  // ✅ 新增：收藏夹分组
             'relations'
         ];
         
@@ -524,100 +348,105 @@ export class DataFetcher {
     /**
      * 加载点赞作品列表（从 API 获取并合并缓存）
      */
-    async loadLikedWorks(iframe, maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.LIKED) {
+    async loadLikedWorks(iframe, maxCount = CONFIG.FETCH_CONFIG.LIST_CONFIGS.liked.maxCount) {
         await this._loadList('liked', iframe, { maxCount });
     }
 
     /**
-     * 建立作品与作者的关系
-     * @param {Array} works - 作品列表（包括视频、图集等）
-     * @param {string} listType - 列表类型（'liked' | 'bookmarked'）
-     * @param {string} collectId - 收藏夹ID（仅当 listType 为 'bookmarked' 时需要）
+     * ✅ 确保默认分组存在（配置驱动）
+     * @param {string} listType - 列表类型
+     * @param {Object} config - 列表配置
      */
-    async buildWorkAuthorRelations(works, listType = 'liked', collectId = null) {
+    async _ensureDefaultGroup(listType, config) {
+        try {
+            const platform = CONFIG.ACTIVE_PLATFORM;
+            const defaultGroupId = `${platform}_${listType}`;
+            
+            // ✅ 配置驱动：从配置获取表名和计数字段
+            const tableName = config.groupTableName;
+            
+            // 检查是否已存在
+            const existingGroup = await database.get(tableName, defaultGroupId);
+            if (existingGroup) {
+                logger.debug(`✅ 默认分组已存在: ${defaultGroupId}`);
+                return;
+            }
+            
+            // ✅ 根据配置创建分组元数据
+            const defaultGroup = {
+                groupId: defaultGroupId,
+                groupName: config.defaultGroupConfig.groupName,
+                description: config.defaultGroupConfig.description,
+                sortOrder: config.defaultGroupConfig.sortOrder,
+                isDeleted: false
+            };
+            
+            // ✅ 添加计数缓存字段（配置驱动）
+            if (config.countField) {
+                defaultGroup[config.countField] = 0;
+            }
+            
+            await database.save(tableName, defaultGroup);
+            logger.info(`✅ 创建默认分组: ${defaultGroupId}`);
+        } catch (error) {
+            logger.warn('⚠️ 创建默认分组失败:', error.message);
+        }
+    }
+    
+    /**
+     * ✅ 通用关系构建方法（配置驱动）
+     * @param {Array} data - 数据列表
+     * @param {Object} relationsConfig - 关系配置
+     * @param {string} collectId - 收藏夹ID（可选，用于动态 targetId）
+     */
+    async _buildRelations(data, relationsConfig, collectId = null) {
+        if (!relationsConfig || !data || data.length === 0) {
+            return;
+        }
+        
         try {
             const relations = [];
             const baseTime = Date.now();
-
-            for (let i = 0; i < works.length; i++) {
-                const work = works[i];
-                // ✅ 使用递减的时间戳模拟操作时间（列表中越靠前的作品，操作时间越新）
-                const operationTime = baseTime - (i * 1); // 每个作品间隔1毫秒
-                // 1. 建立 作品 → 作者 的关系（始终建立）
-                if (work.author && work.author.uid) {
-                    relations.push({
-                        sourceType: 'work',
-                        sourceId: work.workId,
-                        targetType: 'author',
-                        targetId: work.author.uid,
-                        createdAt: operationTime
-                    });
+            
+            for (let i = 0; i < data.length; i++) {
+                const item = data[i];
+                const operationTime = baseTime - (i * 1);
+                
+                // 获取 sourceId
+                const sourceId = item[relationsConfig.sourceField];
+                if (!sourceId) continue;
+                
+                // 获取 targetId（优先使用配置的 targetId，其次使用动态字段）
+                let targetId = relationsConfig.targetId;
+                if (!targetId && relationsConfig.targetField) {
+                    targetId = item[relationsConfig.targetField] || collectId;
                 }
-
-                // 2. 根据列表类型建立 作品 → 分组 的关系
-                if (listType === 'liked') {
-                    // 点赞列表：建立 作品 → liked_group 的关系
-                    relations.push({
-                        sourceType: 'work',
-                        sourceId: work.workId,
-                        targetType: 'liked_group',
-                        targetId: 'liked',
-                        createdAt: operationTime
-                    });
-                } else if (listType === 'bookmarked' && collectId) {
-                    // 收藏列表：建立 作品 → collect 的关系
-                    relations.push({
-                        sourceType: 'work',
-                        sourceId: work.workId,
-                        targetType: 'collect',
-                        targetId: collectId,
-                        createdAt: operationTime
-                    });
+                
+                // ✅ 只有 author_group 或 collect_group 且 targetId 为 null 时，才使用默认分组
+                if (!targetId && (relationsConfig.targetType === 'author_group' || relationsConfig.targetType === 'collect_group')) {
+                    const platform = CONFIG.ACTIVE_PLATFORM;
+                    const listType = relationsConfig.targetType === 'author_group' ? 'following' : 'collects';
+                    targetId = `${platform}_${listType}`;
                 }
+                
+                if (!targetId) continue;
+                
+                // 创建关系记录
+                relations.push({
+                    sourceType: relationsConfig.sourceType,
+                    sourceId: sourceId,
+                    targetType: relationsConfig.targetType,
+                    targetId: targetId,
+                    createdAt: operationTime
+                });
             }
-
+            
             if (relations.length > 0) {
                 await relationManager.batchAddRelations(relations);
                 logger.debug(`✅ 建立了 ${relations.length} 个关系记录`);
             }
         } catch (error) {
             logger.warn('⚠️ 建立关系失败', error);
-        }
-    }
-    
-    /**
-     * ✅ 建立作者与分组的关系（用于关注列表）
-     * @param {Array} authors - 作者列表
-     * @param {string} groupId - 分组ID（如 'following'）
-     */
-    async buildAuthorGroupRelations(authors, groupId = 'following') {
-        try {
-            const relations = [];
-            const baseTime = Date.now();
-
-            for (let i = 0; i < authors.length; i++) {
-                const author = authors[i];
-                // ✅ 使用递减的时间戳模拟操作时间
-                const operationTime = baseTime - (i * 1);
-                
-                // 建立 author -> author_group 的关系
-                if (author.uid) {
-                    relations.push({
-                        sourceType: 'author',
-                        sourceId: author.uid,
-                        targetType: 'author_group',
-                        targetId: groupId,
-                        createdAt: operationTime
-                    });
-                }
-            }
-
-            if (relations.length > 0) {
-                await relationManager.batchAddRelations(relations);
-                logger.debug(`✅ 建立了 ${relations.length} 个作者-分组关系记录`);
-            }
-        } catch (error) {
-            logger.warn('⚠️ 建立作者-分组关系失败', error);
         }
     }
 }

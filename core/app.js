@@ -201,8 +201,8 @@ class App {
     /**
      * ✅ 处理收藏作品列表加载进度
      */
-    handleCollectWorksProgress(currentCount, totalCount) {
-        this.listDisplayManager.handleCollectWorksProgress(currentCount, totalCount, this.bookmarkedManager);
+    handleCollectWorksProgress(collectName, currentCount, totalCount) {
+        this.listDisplayManager.handleCollectWorksProgress(collectName, currentCount, totalCount, this.bookmarkedManager);
     }
     
     /**
@@ -362,7 +362,7 @@ class App {
      * 处理用户信息
      */
     handleUserInfo(userInfo) {
-        logger.info('收到用户信息:', userInfo.nickname);
+        logger.debug('收到用户信息:', JSON.stringify(userInfo, null, 2));
         this.userInfo = userInfo;
         this.displayUserInfo(userInfo);
     }

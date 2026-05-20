@@ -68,24 +68,14 @@ export async function loadAuthorsBase(fileSystem) {
             items.sort((a, b) => (a.order || 0) - (b.order || 0));
             authors = items.map(({ order, ...author }) => author);
             logger.info(`✅ 从 IndexedDB 加载 ${authors.length} 个作者`);
-        } else {
-            // 2. 降级到文件系统
-            logger.info('ℹ️ IndexedDB 无数据，尝试从文件系统加载...');
-            const content = await fileSystem.readTextFile(`${fileSystem.getMetadataDir()}/authors_base.js`);
-
-            if (content) {
-                const data = fileSystem.deserializeData(content, 'authors_base');
-                authors = data?.authors || [];
-                logger.info(`✅ 从文件系统加载 ${authors.length} 个作者`);
-            }
         }
 
-        // 3. 始终从文件系统加载 metadata
+        // ✅ 始终从文件系统加载 metadata
         let metadata = {};
         try {
-            const content = await fileSystem.readTextFile(`${fileSystem.getMetadataDir()}/authors_base.js`);
+            const content = await fileSystem.readTextFile(`${fileSystem.getMetadataDir()}/authors.js`);
             if (content) {
-                const data = fileSystem.deserializeData(content, 'authors_base');
+                const data = fileSystem.deserializeData(content, 'authors');
                 metadata = data?.metadata || {};
             }
         } catch (error) {
@@ -100,7 +90,7 @@ export async function loadAuthorsBase(fileSystem) {
 }
 
 /**
- * 查询作者下载状态
+ * 查询作者下载状态（实时计算，不依赖持久化字段）
  *
  * @param {Object} fileSystem - FileSystem 实例
  * @param {string} uid - 作者ID
@@ -110,20 +100,39 @@ export async function getAuthorDownloadStatus(fileSystem, uid) {
     try {
         await fileSystem.initDatabase();
         
-        const author = await database.get('authors', uid);
-        if (!author) {
-            logger.debug(`ℹ️ 作者不存在: ${uid}`);
-            return null;
+        // 1. 通过索引查询该作者的所有作品关系
+        const relations = await database.getByIndex('relations', 'source', ['author', uid]);
+        const totalCount = relations.length;
+        
+        if (totalCount === 0) {
+            logger.debug(`ℹ️ 作者无作品: ${uid}`);
+            return {
+                downloadStatus: 'completed',
+                downloadedCount: 0,
+                totalCount: 0
+            };
+        }
+        
+        // 2. 提取所有作品ID
+        const workIds = relations.map(r => r.targetId);
+        
+        // 3. ✅ 批量查询这些作品是否在 completed_works 中（利用主键索引）
+        const existingRecords = await database.getByIds('completed_works', workIds);
+        const downloadedCount = existingRecords.length;
+        
+        // 4. 计算状态
+        let downloadStatus = 'pending';
+        if (downloadedCount > 0) {
+            downloadStatus = downloadedCount >= totalCount ? 'completed' : 'partial';
         }
         
         const status = {
-            downloadStatus: author.downloadStatus || 'pending',
-            downloadedCount: author.downloadedCount || 0,
-            totalCount: author.totalCount || 0,
-            lastDownloadTime: author.lastDownloadTime || null
+            downloadStatus,
+            downloadedCount,
+            totalCount
         };
         
-        logger.debug(`✅ 查询作者状态: ${uid}`, status);
+        logger.debug(`✅ 查询作者状态: ${uid}, 状态:`, status);
         return status;
     } catch (error) {
         logger.error('❌ 查询作者状态失败:', error);
@@ -131,44 +140,4 @@ export async function getAuthorDownloadStatus(fileSystem, uid) {
     }
 }
 
-/**
- * 更新作者下载状态（保存到 IndexedDB + 异步备份到文件系统）
- *
- * @param {Object} fileSystem - FileSystem 实例
- * @param {Object} backupManager - BackupManager 实例
- * @param {string} uid - 作者ID
- * @param {string} status - 下载状态 'pending' | 'partial' | 'completed'
- * @param {number} downloadedCount - 已下载数量
- * @param {number} totalCount - 总数量
- */
-export async function updateAuthorDownloadStatus(fileSystem, backupManager, uid, status, downloadedCount, totalCount) {
-    try {
-        await fileSystem.initDatabase();
-        
-        // 获取现有作者数据
-        const author = await database.get('authors', uid);
-        if (!author) {
-            logger.warn(`⚠️ 作者不存在，无法更新状态: ${uid}`);
-            return;
-        }
-        
-        // 更新状态字段
-        author.downloadStatus = status;
-        author.downloadedCount = downloadedCount;
-        author.totalCount = totalCount;
-        author.lastDownloadTime = Date.now();
-        
-        // 保存到 IndexedDB
-        await database.save('authors', author);
-        logger.info(`✅ 已更新作者下载状态: ${uid} -> ${status} (${downloadedCount}/${totalCount})`);
-        
-        // ✅ 异步备份到文件系统（符合增量备份规则）
-        backupManager.performSelectiveBackup(['authors']).catch(error => {
-            logger.warn('⚠️ 作者状态备份失败:', error.message);
-        });
-    } catch (error) {
-        logger.error('❌ 更新作者下载状态失败:', error);
-        throw error;
-    }
-}
 

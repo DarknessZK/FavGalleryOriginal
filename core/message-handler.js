@@ -15,7 +15,7 @@ class MessageHandler {
      * 设置消息监听器
      */
     setup() {
-        window.addEventListener('message', (event) => {
+        window.addEventListener('message', async (event) => {
             if (!event.data || event.data.source !== 'content') return;
 
             // ✅ 忽略 DatabaseProxy 的内部响应消息
@@ -57,7 +57,11 @@ class MessageHandler {
 
                 // ✅ 收藏列表进度消息
                 case 'COLLECT_WORKS_PROGRESS':
-                    this.app.handleCollectWorksProgress(event.data.currentCount, event.data.totalCount);
+                    this.app.handleCollectWorksProgress(
+                        event.data.collectName,
+                        event.data.current,
+                        event.data.total
+                    );
                     break;
 
                 case 'LIKED_WORKS_ERROR':
@@ -179,9 +183,10 @@ class MessageHandler {
                 // ✅ 作者作品总数通知
                 case 'AUTHOR_WORKS_COUNT':
                     if (this.app.authorDownloadManager) {
-                        this.app.authorDownloadManager.setTotalWorks(
+                        await this.app.authorDownloadManager.handleAuthorWorksCount(
                             event.data.uid,
-                            event.data.totalCount
+                            event.data.count,
+                            event.data.skippedCount || 0
                         );
                     }
                     break;
@@ -189,7 +194,7 @@ class MessageHandler {
                 // ✅ 作者作品下载进度
                 case 'AUTHOR_WORK_PROGRESS':
                     if (this.app.authorDownloadManager) {
-                        this.app.authorDownloadManager.workCompleted(
+                        await this.app.authorDownloadManager.workCompleted(
                             event.data.uid,
                             event.data.success
                         );

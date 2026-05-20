@@ -53,7 +53,7 @@ export async function smartIncrementalFetch(
 
     while (hasMore && allData.length < maxCount) {
         try {
-            logger.debug(`🔄 开始第 ${allData.length / 20 + 1} 批获取，cursor=${cursor}`);
+            logger.debug(`🔄 开始第 ${Math.ceil(allData.length / 20) + 1} 批获取，cursor=${cursor}`);
             
             const result = await fetchFn(cursor);
 
@@ -61,12 +61,6 @@ export async function smartIncrementalFetch(
                 logger.warn('⚠️ 获取数据为空');
                 break;
             }
-            
-            logger.debug(`✅ 第 ${allData.length / 20 + 1} 批获取成功:`, {
-                batch_size: result.data.length,
-                hasMore: result.hasMore,
-                cursor: result.cursor
-            });
 
             // ✅ 去重逻辑：过滤掉已存在的 ID
             let newData = result.data;
@@ -74,10 +68,18 @@ export async function smartIncrementalFetch(
                 newData = result.data.filter(item => !cachedIds.has(item[idField]));
             }
 
-            // ✅ 早期退出：只有当曾经完整加载过时，才启用此优化
-            // 如果首次加载中途中止，必须继续获取直到达到 maxCount
-            if (isFullyLoaded && cachedIds && cachedIds.size > 0 && result.data.length > 0 && newData.length === 0) {
-                logger.info('✅ 检测到本批次全部已缓存，无新作品，提前停止获取');
+            // ✅ 早期退出：只要发现有一个已缓存的作品，就立即退出
+            // 因为 API 从新到旧返回，发现已缓存说明后面的数据也必然已缓存
+            const hasCachedItem = cachedIds && cachedIds.size > 0 && 
+                                  result.data.length > 0 && 
+                                  newData.length < result.data.length;
+            
+            if (isFullyLoaded && hasCachedItem) {
+                logger.info(`✅ 检测到已缓存作品（本批 ${result.data.length} 个中有 ${result.data.length - newData.length} 个已缓存），提前停止获取`);
+                
+                // 合并当前批的新作品
+                newCount += newData.length;
+                allData = allData.concat(newData);
                 break;
             }
 
@@ -102,8 +104,12 @@ export async function smartIncrementalFetch(
                 break;
             }
 
-            // 延迟避免请求过快
-            await delay(delayMs);
+            // ✅ 随机延迟（防封号）- 从配置读取
+            const minDelay = CONFIG.FETCH_CONFIG.REQUEST_DELAY.min;
+            const maxDelay = CONFIG.FETCH_CONFIG.REQUEST_DELAY.max;
+            const randomDelay = Math.floor(Math.random() * (maxDelay - minDelay)) + minDelay;
+            logger.debug(`⏱️ 等待 ${randomDelay}ms 后继续...`);
+            await delay(randomDelay);
 
         } catch (error) {
             currentRetry++;
@@ -218,7 +224,7 @@ export function mergeWorkData(cachedWorks, apiWorks, metadata, metadataField, ap
     // ✅ 判断是否完整加载（双重判断机制）：
     // 情况1：API 返回的作品数 < 请求的 maxCount（已经到底了）
     // 情况2：所有返回的作品都已缓存（说明没有新作品了，适用于开发环境小批量测试）
-    const apiRequestedCount = apiResult.requestedCount || CONFIG.FETCH_CONFIG.LIST_DEFAULTS.LIKED;
+    const apiRequestedCount = apiResult.requestedCount || CONFIG.FETCH_CONFIG.LIST_CONFIGS.liked.maxCount;
     const isFullyLoaded = 
         (apiWorks.length > 0 && apiWorks.length < apiRequestedCount) ||
         (apiWorks.length > 0 && newCount === 0);
