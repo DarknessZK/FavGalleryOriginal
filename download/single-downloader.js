@@ -135,6 +135,9 @@ export class SingleDownloader {
                 throw new Error('作品详情中缺少视频URL');
             }
 
+            const hasBitRate = workDetail.video?.bit_rate && workDetail.video.bit_rate.length > 0;
+            logger.info(`🎬 画质: ${hasBitRate ? '高清' : '默认'}`);
+
             // ✅ 注入脚本执行下载
             const result = await this.executePageDownload({
                 workId: workDetail.workId,

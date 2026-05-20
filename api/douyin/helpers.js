@@ -70,7 +70,6 @@ export function getDouyinWebId() {
  */
 export function getUserInfoFromPage() {
     try {
-        logger.debug('=== 开始获取用户信息 ===');
 
         let userInfo = null;
         let successMethod = null;

@@ -162,7 +162,11 @@ export class BatchDownloadManager {
 
                 // 如果不是最后一个，添加随机延迟
                 if (i < workIds.length - 1 && !this.shouldStop) {
-                    await this.randomDelay();
+                    // ✅ 如果上一个作品因文件已存在被跳过（skipped=true），则不执行延迟
+                    const lastResult = results[results.length - 1];
+                    if (!lastResult || !lastResult.skipped) {
+                        await this.randomDelay();
+                    }
                 }
             }
 

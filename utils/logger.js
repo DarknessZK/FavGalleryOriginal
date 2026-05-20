@@ -18,28 +18,49 @@ class Logger {
      * 信息日志
      */
     info(...args) {
-        fileLogger.writeToFile('INFO', this.module, args.join(' '));
+        const message = this._formatArgs(args);
+        fileLogger.writeToFile('INFO', this.module, message);
     }
 
     /**
      * 调试日志
      */
     debug(...args) {
-        fileLogger.writeToFile('DEBUG', this.module, args.join(' '));
+        const message = this._formatArgs(args);
+        fileLogger.writeToFile('DEBUG', this.module, message);
     }
 
     /**
      * 警告日志
      */
     warn(...args) {
-        fileLogger.writeToFile('WARN', this.module, args.join(' '));
+        const message = this._formatArgs(args);
+        fileLogger.writeToFile('WARN', this.module, message);
     }
 
     /**
      * 错误日志
      */
     error(...args) {
-        fileLogger.writeToFile('ERROR', this.module, args.join(' '));
+        const message = this._formatArgs(args);
+        fileLogger.writeToFile('ERROR', this.module, message);
+    }
+    
+    /**
+     * 格式化参数（处理对象）
+     * @private
+     */
+    _formatArgs(args) {
+        return args.map(arg => {
+            if (typeof arg === 'object' && arg !== null) {
+                try {
+                    return JSON.stringify(arg, null, 2);
+                } catch (e) {
+                    return String(arg);
+                }
+            }
+            return String(arg);
+        }).join(' ');
     }
 }
 

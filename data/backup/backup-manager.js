@@ -259,19 +259,22 @@ class BackupManager {
             // 4. 备份 author_groups 表
             await this._backupTableWithHash('author_groups', manifest, force);
 
-            // 5. 备份 liked_group 表
+            // 5. 备份 collect_groups 表
+            await this._backupTableWithHash('collect_groups', manifest, force);
+
+            // 6. 备份 liked_group 表
             await this._backupTableWithHash('liked_group', manifest, force);
 
-            // 6. 备份 works 表（按季度分片）
+            // 7. 备份 works 表（按季度分片）
             await this._backupWorksByQuarter(manifest, force);
 
-            // 7. 备份 relations 表
+            // 8. 备份 relations 表
             await this._backupTableWithHash('relations', manifest, force);
 
-            // 8. 备份 completed_works 表
+            // 9. 备份 completed_works 表
             await this._backupTableWithHash('completed_works', manifest, force);
 
-            // 9. 保存 manifest
+            // 10. 保存 manifest
             manifest.lastBackupTime = Date.now();
             await this._saveManifest(manifest);
 
@@ -500,7 +503,7 @@ class BackupManager {
     /**
      * 异步备份数据到文件系统
      *
-     * @param {string} dataType - 数据类型（如 'authors_base', 'liked_works'）
+     * @param {string} dataType - 数据类型（如 'authors', 'liked_works'）
      * @param {*} data - 要备份的数据
      * @private
      */

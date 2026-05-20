@@ -168,12 +168,12 @@ export class WorkListManager {
 
     /**
      * 更新 UI 显示
-     * @param {Set} selectedWorkIds - 选中的作品ID集合（可选，用于分页时保持 checkbox 状态）
+     * @param {Set} selectedIds - 选中的ID集合（可选，用于分页时保持 checkbox 状态）
      */
-    updateUI(selectedWorkIds = null) {
+    updateUI(selectedIds = null) {
         this.updateStatus();
         this.updateSearchInput();
-        this.renderList(selectedWorkIds);
+        this.renderList(selectedIds);
         this.updatePaginationControls();
     }
 
@@ -217,9 +217,9 @@ export class WorkListManager {
 
     /**
      * 渲染列表
-     * @param {Set} selectedWorkIds - 选中的作品ID集合（可选，用于分页时保持 checkbox 状态）
+     * @param {Set} selectedIds - 选中的ID集合（可选，用于分页时保持 checkbox 状态）
      */
-    renderList(selectedWorkIds = null) {
+    renderList(selectedIds = null) {
         if (!this.elements.list) return;
 
         const data = this.getCurrentPageData();
@@ -227,11 +227,11 @@ export class WorkListManager {
         // ✅ 动态导入渲染函数
         import('./work-helpers.js').then(({ renderWorkList, renderAuthorList }) => {
             if (this.type === 'following') {
-                // ✅ 渲染作者列表
-                renderAuthorList(this.elements.list, data);
+                // ✅ 渲染作者列表，传递选中状态
+                renderAuthorList(this.elements.list, data, selectedIds);
             } else {
                 // 渲染作品列表，传递选中状态
-                renderWorkList(this.elements.list, data, selectedWorkIds);
+                renderWorkList(this.elements.list, data, selectedIds);
             }
         });
     }

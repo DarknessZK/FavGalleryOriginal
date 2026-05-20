@@ -39,7 +39,7 @@ export async function saveCollects(fileSystem, backupManager, collects) {
  * 加载所有收藏夹元数据（IndexedDB 优先，降级到文件系统）
  *
  * @param {Object} fileSystem - FileSystem 实例
- * @returns {Promise<Array>} 收藏夹列表
+ * @returns {Promise<Object>} {collects: Array, metadata: Object} 收藏夹列表和元数据
  */
 export async function loadAllCollects(fileSystem) {
     try {
@@ -60,7 +60,7 @@ export async function loadAllCollects(fileSystem) {
         
         if (collects && collects.length > 0) {
             logger.info(`✅ 从 IndexedDB 加载 ${collects.length} 个收藏夹`);
-            return collects;
+            return { collects, metadata: {} };
         }
         
         // 2. 降级到文件系统
@@ -71,13 +71,13 @@ export async function loadAllCollects(fileSystem) {
             const data = fileSystem.deserializeData(content, 'collects');
             collects = data?.collects || [];
             logger.info(`✅ 从文件系统加载 ${collects.length} 个收藏夹`);
-            return collects;
+            return { collects, metadata: {} };
         }
         
         logger.info('📭 未找到收藏夹数据');
-        return [];
+        return { collects: [], metadata: {} };
     } catch (error) {
         logger.error('❌ 加载收藏夹数据失败:', error);
-        return [];
+        return { collects: [], metadata: {} };
     }
 }

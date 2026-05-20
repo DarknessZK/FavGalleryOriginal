@@ -12,12 +12,12 @@
 │   ├── metadata/                        ← 元数据和备份数据（按平台分类）
 │   │   ├── douyin/                      ← 抖音平台数据
 │   │   │   ├── manifest.json            ← 备份清单（记录哈希值和时间戳）
-│   │   │   ├── authors_base.js          ← 作者基础信息
-│   │   │   ├── collects_base.js         ← 收藏夹数据
-│   │   │   ├── author_groups_base.js    ← 作者分组数据
-│   │   │   ├── liked_group_base.js      ← 点赞分组数据
-│   │   │   ├── relations_base.js        ← 关系数据
-│   │   │   ├── completed_works_base.js  ← 已完成作品数据
+│   │   │   ├── authors.js               ← 作者基础信息
+│   │   │   ├── collects.js              ← 收藏夹数据
+│   │   │   ├── author_groups.js         ← 作者分组数据
+│   │   │   ├── liked_group.js           ← 点赞分组数据
+│   │   │   ├── relations.js             ← 关系数据
+│   │   │   ├── completed_works.ndjson   ← 已完成作品数据（NDJSON增量格式）
 │   │   │   ├── settings.json            ← 系统设置（JSON格式）
 │   │   │   ├── following_status.js      ← 关注状态缓存
 │   │   │   ├── liked_works.js           ← 点赞作品缓存
@@ -75,7 +75,7 @@
 ### 4. 避免冗余
 
 - 同一个数据只存储一份
-- `authors_base.js` 同时用于缓存和备份，不重复存储
+- `authors.js` 同时用于缓存和备份，不重复存储
 - works 表按季度分片，避免单文件过大
 
 ---
@@ -102,12 +102,12 @@
 
 #### 1.2 普通表备份文件（`{表名}.js`）
 - **文件列表**：
-  - `authors_base.js` - 作者基础信息
-  - `collects_base.js` - 收藏夹数据
-  - `author_groups_base.js` - 作者分组数据
-  - `liked_group_base.js` - 点赞分组数据
-  - `relations_base.js` - 关系数据
-  - `completed_works_base.js` - 已完成作品数据
+  - `authors.js` - 作者基础信息
+  - `collects.js` - 收藏夹数据
+  - `author_groups.js` - 作者分组数据
+  - `liked_group.js` - 点赞分组数据
+  - `relations.js` - 关系数据
+  - `completed_works.ndjson` - 已完成作品数据（NDJSON增量格式）
 
 - **特点**：
   - 每个表一个文件
@@ -226,19 +226,19 @@ FILE_SYSTEM: {
 ### ❌ 错误 1：硬编码路径
 ```javascript
 // 错误
-const path = 'data/.appdata/metadata/authors_base.js';
+const path = 'data/.appdata/metadata/authors.js';
 
 // 正确
-const path = `${CONFIG.FILE_SYSTEM.METADATA_DIR}/${platform}/authors_base.js`;
+const path = `${CONFIG.FILE_SYSTEM.METADATA_DIR}/${platform}/authors.js`;
 ```
 
 ### ❌ 错误 2：忘记按平台分类
 ```javascript
 // 错误
-const path = `${CONFIG.FILE_SYSTEM.METADATA_DIR}/authors_base.js`;
+const path = `${CONFIG.FILE_SYSTEM.METADATA_DIR}/authors.js`;
 
 // 正确
-const path = `${CONFIG.FILE_SYSTEM.METADATA_DIR}/${platform}/authors_base.js`;
+const path = `${CONFIG.FILE_SYSTEM.METADATA_DIR}/${platform}/authors.js`;
 ```
 
 ### ❌ 错误 3：混淆 cache 和 backup

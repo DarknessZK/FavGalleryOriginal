@@ -291,7 +291,7 @@ export class DouyinAPI {
      *     { isFullyLoaded: true }
      * );
      */
-    async getFollowingList(maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.FOLLOWING, onProgress = null, cachedUids = null, metadata = null) {  // ✅ 新增：metadata 参数
+    async getFollowingList(maxCount = CONFIG.FETCH_CONFIG.LIST_CONFIGS.following.maxCount, onProgress = null, cachedUids = null, metadata = null) {  // ✅ 新增：metadata 参数
         logger.info(`👥 [关注列表] 开始获取，目标数量: ${maxCount}`);
         
         // 确保已获取用户信息
@@ -302,15 +302,12 @@ export class DouyinAPI {
         }
 
         const cachedIds = cachedUids ? new Set(cachedUids) : null;
-        logger.debug(`📋 [关注列表] 缓存 ID 数量: ${cachedIds?.size || 0}`);
 
         // 定义批量获取函数
         let maxCursor = 0;
         
         const fetchBatch = async (cursor) => {
             maxCursor = cursor || 0;
-            
-            logger.debug(`🌐 [关注列表] 发起 API 请求，cursor: ${maxCursor}`);
             
             const params = new URLSearchParams({
                 ...getDouyinDeviceParams(),
@@ -326,7 +323,6 @@ export class DouyinAPI {
             });
 
             const url = `${DOUYIN_CONFIG.API_ENDPOINTS.FOLLOWING_LIST}?${params}`;
-            logger.debug(`📤 [关注列表] 请求 URL: ${url.substring(0, 150)}...`);
 
             // 发送请求（带重试）
             const data = await this._requestWithRetry(async () => {
@@ -336,8 +332,6 @@ export class DouyinAPI {
                 });
                 return this._handleAPIResponse(response);
             });
-
-            logger.debug(`📥 [关注列表] API 响应接收: ${(data.followings || []).length} 条数据`);
 
             // 更新游标（使用 min_time，参考旧项目实现）
             if (data.min_time !== undefined && data.min_time !== null) {
@@ -405,7 +399,7 @@ export class DouyinAPI {
      *     { isFullyLoaded: true }
      * );
      */
-    async getLikedWorks(maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.LIKED, onProgress = null, cachedWorkIds = null, metadata = null) {  // ✅ 新增：metadata 参数
+    async getLikedWorks(maxCount = CONFIG.FETCH_CONFIG.LIST_CONFIGS.liked.maxCount, onProgress = null, cachedWorkIds = null, metadata = null) {  // ✅ 新增：metadata 参数
         logger.info(`❤️ [点赞列表] 开始获取，目标数量: ${maxCount}`);
         
         // 确保已获取用户信息
@@ -513,7 +507,7 @@ export class DouyinAPI {
      *     { isFullyLoaded: true }
      * );
      */
-    async getBookmarkedWorks(maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.BOOKMARKED, onProgress = null, cachedWorkIds = null, metadata = null) {  // ✅ 新增：metadata 参数
+    async getBookmarkedWorks(maxCount = CONFIG.FETCH_CONFIG.LIST_CONFIGS.bookmarked.maxCount, onProgress = null, cachedWorkIds = null, metadata = null) {  // ✅ 新增：metadata 参数
         logger.info(`⭐ [收藏列表] 开始获取，目标数量: ${maxCount}`);
         
         // 确保已获取用户信息
@@ -626,7 +620,7 @@ export class DouyinAPI {
      *     (current, total) => console.log(`进度: ${current}/${total}`)
      * );
      */
-    async getAuthorWorksForList(platformId, maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.AUTHOR_WORKS, onProgress = null) {
+    async getAuthorWorksForList(platformId, maxCount = CONFIG.FETCH_CONFIG.LIST_CONFIGS.following.maxCount, onProgress = null) {
         // 参数验证
         if (!platformId) {
             throw new Error('缺少 platformId 参数');
@@ -918,7 +912,7 @@ export class DouyinAPI {
             };
 
         } catch (error) {
-            console.error('[DouyinAPI] 获取收藏夹作品失败:', error);
+            logger.error('[DouyinAPI] 获取收藏夹作品失败:', error);
             throw error;
         }
     }
@@ -932,7 +926,7 @@ export class DouyinAPI {
      * @param {Object} metadata - 元数据
      * @returns {Promise<Object>} { works, hasMore, cursor }
      */
-    async getCollectWorksIncremental(collectId, maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.BOOKMARKED, onProgress = null, cachedWorkIds = null, metadata = null) {
+    async getCollectWorksIncremental(collectId, maxCount = CONFIG.FETCH_CONFIG.LIST_CONFIGS.bookmarked.maxCount, onProgress = null, cachedWorkIds = null, metadata = null) {
         const cachedIds = cachedWorkIds ? new Set(cachedWorkIds) : null;
         
         // 定义批量获取函数
@@ -1059,7 +1053,7 @@ export class DouyinAPI {
             return work;
 
         } catch (error) {
-            console.error('[DouyinAPI] 获取作品详情失败:', error);
+            logger.error('[DouyinAPI] 获取作品详情失败:', error);
             throw error;
         }
     }

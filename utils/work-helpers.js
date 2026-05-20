@@ -84,8 +84,8 @@ function createWorkCardHTML(work, selectedWorkIds = null) {
                 </div>
                 <div style="font-size: 12px; color: #999;">
                     ${isImagePost ? `🖼️ 图集 (${imageCount}张)` : `⏱️ ${Math.floor(duration / 1000)}秒`} | 
-                    ▶️ ${playCount} | 
-                    ❤️ ${likeCount}  <!-- ✅ 改为 likeCount -->
+                    ${playCount > 0 ? `▶️ ${formatNumber(playCount)} | ` : ''}
+                    ❤️ ${formatNumber(likeCount)}  <!-- ✅ 改为 likeCount -->
                 </div>
                 <div style="margin-top: 8px; display: flex; gap: 4px; align-items: center;">
                     <a href="${workUrl}" target="_blank" class="jump-btn" data-work-id="${workId}" style="
@@ -150,8 +150,9 @@ export function renderWorkList(listEl, works, selectedWorkIds = null) {
 /**
  * 生成作者卡片 HTML
  * @param {Object} author - 作者数据对象
+ * @param {Set} selectedAuthorIds - 选中的作者UID集合（可选）
  */
-function createAuthorCardHTML(author) {
+function createAuthorCardHTML(author, selectedAuthorIds = null) {
     const nickname = author.nickname || '未知作者';
     const uniqueId = author.uniqueId || author.shortId || '';
     // ✅ 直接使用 avatarUrl（已经是字符串）
@@ -180,7 +181,7 @@ function createAuthorCardHTML(author) {
     let buttonClass = 'download-btn';
     
     // ✅ 优先判断：如果没有作品，直接显示已保存
-    if (workCount === 0 || downloadStatus === 'completed') {
+    if (workCount === 0 ) {
         buttonText = '✅ 已保存';
         buttonStyle = 'background: #52c41a; cursor: default; text-align: center;';
         buttonDisabled = true;
@@ -190,6 +191,9 @@ function createAuthorCardHTML(author) {
         buttonStyle = 'background: #faad14; text-align: center;';
         buttonClass = 'download-btn partial';
     }
+    
+    // ✅ 检查是否被选中
+    const isChecked = selectedAuthorIds && selectedAuthorIds.has(uid);
 
     return `
         <div class="author-item" data-uid="${uid}" style="
@@ -204,6 +208,7 @@ function createAuthorCardHTML(author) {
         ">
             <input type="checkbox" class="author-checkbox" data-uid="${uid}" 
                 style="margin-right: 0; cursor: pointer;"
+                ${isChecked ? 'checked' : ''}
                 ${buttonDisabled ? 'disabled' : ''}>
             ${avatarUrl ? `
                 <img src="${avatarUrl}" style="width: 80px; height: 100px; object-fit: cover; border-radius: 4px;" />
@@ -273,8 +278,9 @@ function createAuthorCardHTML(author) {
  * 渲染作者列表
  * @param {HTMLElement} listEl - 列表容器元素
  * @param {Array} authors - 作者数据数组
+ * @param {Set} selectedAuthorIds - 选中的作者UID集合（可选）
  */
-export function renderAuthorList(listEl, authors) {
+export function renderAuthorList(listEl, authors, selectedAuthorIds = null) {
     if (!listEl) {
         logger.warn('⚠️ 列表容器元素不存在');
         return;
@@ -285,7 +291,7 @@ export function renderAuthorList(listEl, authors) {
         return;
     }
 
-    const html = authors.map(author => createAuthorCardHTML(author)).join('');
+    const html = authors.map(author => createAuthorCardHTML(author, selectedAuthorIds)).join('');
 
     listEl.innerHTML = html;
 

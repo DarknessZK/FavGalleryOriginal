@@ -96,7 +96,7 @@ export const CONFIG = {
         
         /** 元数据文件名称映射 */
         METADATA_FILES: {
-            AUTHORS_BASE: 'authors_base',
+            AUTHORS: 'authors',
             FOLLOWING_STATUS: 'following_status',
             LIKED_WORKS: 'liked_works',  // ✅ 改为 liked_works
             BOOKMARKED_WORKS: 'bookmarked_works'  // ✅ 改为 bookmarked_works
@@ -180,16 +180,131 @@ export const CONFIG = {
         /** 批量下载模式最大获取数量 */
         BATCH_MAX_COUNT: 200,
         
-        /** 不同列表类型的默认获取数量 */
-        LIST_DEFAULTS: {
-            FOLLOWING: 60,        // 关注列表
-            LIKED: 100,            // 点赞列表
-            BOOKMARKED: 60,       // 收藏列表
-            AUTHOR_WORKS: 60      // 作者作品列表
+        /** ✅ 列表基础配置 - 纯数据配置（不含方法） */
+        LIST_CONFIGS: {
+            liked: {
+                maxCount: 100,
+                folderRequired: true,
+                skipIncrementalCheck: false,
+                saveKey: 'works',  // ✅ 保存时的字段名
+                resultKey: 'works',  // ✅ API返回的字段名
+                idField: 'workId',  // ✅ 主键字段名
+                relations: {
+                    groupType: 'liked_group',
+                    groupId: 'liked',
+                    // ✅ 关系构建配置
+                    sourceType: 'work',
+                    sourceField: 'workId',
+                    targetType: 'liked_group',
+                    targetId: 'liked'
+                },
+                messages: {
+                    loaded: 'LIKED_WORKS_LOADED',
+                    progress: 'LIKED_WORKS_PROGRESS',
+                    error: 'LIKED_WORKS_ERROR',
+                    clear: 'CLEAR_LIKED_LIST',
+                    start: 'LOAD_DATA_START'
+                }
+            },
+            bookmarked: {
+                maxCount: 60,
+                folderRequired: true,
+                skipIncrementalCheck: false,
+                saveKey: 'works',  // ✅ 保存时的字段名
+                resultKey: 'works',  // ✅ API返回的字段名
+                idField: 'workId',  // ✅ 主键字段名
+                relations: {
+                    groupType: 'collect',
+                    groupId: null,  // 动态设置
+                    // ✅ 关系构建配置
+                    sourceType: 'work',
+                    sourceField: 'workId',
+                    targetType: 'collect',
+                    targetField: 'collectId'  // 动态获取
+                },
+                messages: {
+                    loaded: 'COLLECT_WORKS_LOADED',
+                    progress: 'COLLECT_WORKS_PROGRESS',
+                    error: 'COLLECT_WORKS_ERROR',
+                    clear: 'CLEAR_BOOKMARKED_LIST',
+                    start: 'LOAD_DATA_START'
+                }
+            },
+            following: {
+                maxCount: 60,
+                folderRequired: true,
+                skipIncrementalCheck: false,  // 关注列表始终调用API检测软删除
+                saveKey: 'authors',  // ✅ 保存时的字段名
+                resultKey: 'authors',  // ✅ API返回的字段名
+                idField: 'uid',  // ✅ 主键字段名
+                groupTableName: 'author_groups',  // ✅ 分组表名
+                countField: 'authorCount',  // ✅ 计数字段名
+                relations: {
+                    groupType: 'author_group',
+                    groupId: null,  // ✅ 动态生成：${platform}_following
+                    // ✅ 关系构建配置
+                    sourceType: 'author',
+                    sourceField: 'uid',
+                    targetType: 'author_group',
+                    targetId: null  // ✅ 动态生成：${platform}_following
+                },
+                // ✅ 抖音平台需要创建默认作者分组
+                needDefaultGroup: true,
+                defaultGroupConfig: {
+                    groupName: '默认',
+                    description: '',
+                    sortOrder: 0
+                },
+                messages: {
+                    loaded: 'FOLLOWING_AUTHORS_LOADED',
+                    progress: 'FOLLOWING_AUTHORS_PROGRESS',
+                    error: 'FOLLOWING_AUTHORS_ERROR',
+                    clear: 'CLEAR_FOLLOWING_LIST',
+                    start: 'LOAD_DATA_START'
+                }
+            },
+            collects: {
+                maxCount: 100,
+                folderRequired: true,
+                skipIncrementalCheck: true,  // 收藏夹列表始终调用API检测软删除
+                saveKey: 'collects',  // ✅ 保存时的字段名
+                resultKey: 'collects',  // ✅ API返回的字段名
+                idField: 'collectId',  // ✅ 主键字段名
+                groupTableName: 'collect_groups',  // ✅ 分组表名
+                countField: 'collectCount',  // ✅ 计数字段名
+                // ✅ 抖音平台需要创建默认收藏夹分组
+                needDefaultGroup: true,
+                defaultGroupConfig: {
+                    groupName: '默认',
+                    description: '',
+                    sortOrder: 0
+                },
+                relations: {
+                    groupType: 'collect_group',
+                    groupId: null,  // ✅ 动态生成：${platform}_collects
+                    // ✅ 关系构建配置
+                    sourceType: 'collect',
+                    sourceField: 'collectId',
+                    targetType: 'collect_group',
+                    targetId: null  // ✅ 动态生成：${platform}_collects
+                },
+                messages: {
+                    loaded: 'COLLECTS_LIST_LOADED',
+                    progress: 'COLLECTS_LIST_PROGRESS',
+                    error: 'COLLECTS_LIST_ERROR',
+                    clear: null,
+                    start: 'LOAD_DATA_START'
+                }
+            }
         },
         
-        /** 收藏夹列表获取数量 */
-        COLLECTS_LIST_MAX_COUNT: 100
+        /** ✅ API 请求间隔配置（防封号） */
+        REQUEST_DELAY: {
+            /** 最小延迟（毫秒） */
+            min: 1000,
+            /** 最大延迟（毫秒） */
+            max: 2000
+        }
     },
     
     // ==========================================
@@ -243,7 +358,7 @@ export const CONFIG = {
         name: 'FavGallery',
         
         /** 数据库版本 */
-        version: 1,
+        version: 2,
         
         /**
          * 对象存储配置
@@ -262,6 +377,7 @@ export const CONFIG = {
             authors: 'uid',                      // 作者列表元数据
             collects: 'collectId',              // ✅ 收藏夹列表元数据
             author_groups: 'groupId',           // ✅ 作者分组元数据（未来扩展）
+            collect_groups: 'groupId',          // ✅ 收藏夹分组元数据
             
             // === 系统配置 ===
             settings: 'key'                      // 系统设置
@@ -285,6 +401,7 @@ export const CONFIG = {
             
             // relations 表的索引（核心）
             relations: [
+                { name: 'sourceType', keyPath: 'sourceType', unique: false },  // ✅ 新增：按类型查询
                 { name: 'source', keyPath: ['sourceType', 'sourceId'], unique: false },
                 { name: 'target', keyPath: ['targetType', 'targetId'], unique: false },
                 { name: 'sourceToTarget', keyPath: ['sourceType', 'sourceId', 'targetType', 'targetId'], unique: true }
@@ -302,10 +419,10 @@ export const CONFIG = {
          */
         batch: {
             /** 作品间最小延迟（毫秒）- 防封号 */
-            minDelay: 3000,
+            minDelay: 2000,
             
             /** 作品间最大延迟（毫秒）- 防封号 */
-            maxDelay: 6000,
+            maxDelay: 5000,
             
             /** 单个作品最大重试次数 */
             maxRetries: 2,
@@ -341,8 +458,11 @@ export const CONFIG = {
          * 分组下载配置（作者/收藏夹级别）
          */
         group: {
-            /** 作者/收藏夹之间的延迟（毫秒） */
-            delayBetweenGroups: 5000,
+            /** 作者/收藏夹之间最小延迟（毫秒）- 防封号 */
+            minDelay: 3000,
+            
+            /** 作者/收藏夹之间最大延迟（毫秒）- 防封号 */
+            maxDelay: 5000,
             
             /** 是否自动跳过已完成的任务 */
             autoSkipCompleted: true,

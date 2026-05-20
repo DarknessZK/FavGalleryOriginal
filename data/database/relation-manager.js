@@ -21,21 +21,47 @@ function generateRelationId(sourceType, sourceId, targetType, targetId) {
 }
 
 /**
- * 批量添加关系
+ * 批量添加关系（智能去重）
  * @param {Array<Object>} relations - 关系数组
  * @returns {Promise<void>}
  */
 export async function batchAddRelations(relations) {
-    const items = relations.map(rel => ({
-        id: generateRelationId(rel.sourceType, rel.sourceId, rel.targetType, rel.targetId),
-        ...rel,
-        // ✅ 优先使用传入的 createdAt，只有在没有提供时才使用当前时间
-        createdAt: rel.createdAt || Date.now()
-    }));
-
     try {
-        await database.save('relations', items);
-        logger.info(`✅ 批量添加关系: ${items.length} 条`);
+        // ✅ 准备所有待插入的关系项
+        const items = relations.map(rel => ({
+            id: generateRelationId(rel.sourceType, rel.sourceId, rel.targetType, rel.targetId),
+            ...rel,
+            // ✅ 优先使用传入的 createdAt，只有在没有提供时才使用当前时间
+            createdAt: rel.createdAt || Date.now()
+        }));
+
+        // ✅ 按 targetType + targetId 分组
+        const groups = new Map();
+        for (const item of items) {
+            const key = `${item.targetType}_${item.targetId}`;
+            if (!groups.has(key)) {
+                groups.set(key, []);
+            }
+            groups.get(key).push(item);
+        }
+
+        // ✅ 批量查询每个分组已存在的关系
+        const existingIds = new Set();
+        for (const [key, groupItems] of groups) {
+            const [targetType, targetId] = key.split('_');
+            const existingRelations = await getIncomingRelations(targetType, targetId);
+            existingRelations.forEach(rel => existingIds.add(rel.id));
+        }
+
+        // ✅ 过滤掉已存在的关系，只保留新的
+        const newItems = items.filter(item => !existingIds.has(item.id));
+        
+        if (newItems.length > 0) {
+            await database.save('relations', newItems);
+            logger.info(`✅ 批量添加关系: ${newItems.length} 条新关系（跳过 ${items.length - newItems.length} 条已存在）`);
+        } else {
+            logger.debug(`ℹ️ 所有关系已存在，无需更新（共 ${items.length} 条）`);
+        }
     } catch (err) {
         logger.error(`❌ 批量添加关系失败`, err);
         throw err;
@@ -169,33 +195,7 @@ export async function getWorkCollectIds(workId) {
     }
 }
 
-// ⚠️ 预留功能 - 用于清理取消点赞/收藏的关系
-/**
- * 删除作品及其所有关系
- * @param {string} workId - 作品ID
- * @returns {Promise<void>}
- */
-export async function deleteWorkWithRelations(workId) {
-    try {
-        // 删除作品记录
-        await database.delete('works', workId);
-        await database.delete('completed_works', workId);
-        
-        // ✅ 使用 getOutgoingRelations 替代全表扫描，性能更优
-        const relations = await getOutgoingRelations('work', workId);
-        
-        for (const relation of relations) {
-            await database.delete('relations', relation.id);
-        }
-        
-        logger.info(`🗑️ 删除作品及关系: ${workId} (${relations.length} 条关系)`);
-    } catch (err) {
-        logger.error(`❌ 删除作品失败: ${workId}`, err);
-        throw err;
-    }
-}
-
-// ⚠️ 预留功能 - 用于 UI 进度显示
+// ⚠️ 预留功能 - 用于完整性检查
 /**
  * 计算作者的下载进度
  * @param {string} uid - 作者UID
@@ -307,7 +307,6 @@ export default {
     getWorkCollectIds,
     getCollectWorkIds,
     getAuthorGroupIds,         // ✅ 新增：获取作者分组
-    deleteWorkWithRelations,
     calculateAuthorProgress,
     calculateCollectProgress
 };

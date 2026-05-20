@@ -446,12 +446,18 @@ class EventBinder {
                     downloadBtn  // ✅ 传递按钮DOM引用
                 );
                 
+                // ✅ 获取 batchId（从 DownloadHandler）
+                const batchId = this.app.downloadHandler?.currentBatchId;
+                
                 // ✅ 触发下载（发送消息到 Content Script）
                 window.parent.postMessage({
                     source: 'sidebar',
                     type: 'DOWNLOAD_AUTHOR_WORKS',
                     uid: authorData.uid,
-                    platformId: authorData.platformId || ''
+                    platformId: authorData.platformId || '',
+                    nickname: authorData.nickname,
+                    folderPath: this.app.folderName || '',
+                    batchId: batchId  // ✅ 携带 batchId
                 }, '*');
                 
                 return;  // ✅ 阻止后续处理
@@ -467,6 +473,7 @@ class EventBinder {
             // ✅ 优先级 3: 检查是否点击复选框
             const checkbox = event.target.closest('.author-checkbox');
             if (checkbox) {
+                console.log('[DEBUG] author-checkbox clicked:', checkbox.dataset.uid, checkbox.checked);
                 const uid = checkbox.dataset.uid;
                 logger.info(`☑️ 作者复选框状态变化: ${uid}, checked=${checkbox.checked}`);
                 this.app.batchSelectionManager.handleCheckboxChange('following', uid, checkbox.checked);

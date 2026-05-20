@@ -22,7 +22,14 @@ export class AuthorDownloadManager {
      * @param {HTMLElement} button - 下载按钮DOM引用
      */
     async startAuthorDownload(uid, platformId, nickname, button) {
-        // ✅ 检查是否为“继续下载”（partial 状态）- 通过 postMessage 查询
+        // ✅ 立即设置 DownloadHandler 状态（在任何异步操作之前）
+        if (this.app.downloadHandler) {
+            this.app.downloadHandler.isDownloading = true;
+            this.app.downloadHandler.currentBatchId = `author_single_${uid}_${Date.now()}`;
+            this.app.downloadHandler.currentBatchListType = 'following';
+        }
+            
+        // ✅ 检查是否为"继续下载"（partial 状态）- 通过 postMessage 查询
         let initialCompleted = 0;
         let totalCount = 0;
                 
@@ -60,6 +67,11 @@ export class AuthorDownloadManager {
         // ✅ 禁用选择文件夹和刷新列表按钮
         if (this.app.uiStateManager) {
             this.app.uiStateManager.setDownloadingState(true);
+        }
+        
+        // ✅ 启用批量停止按钮（支持单个作者下载时停止）
+        if (this.app.uiStateManager) {
+            this.app.uiStateManager.enableStopDownloadButton();
         }
 
         logger.info('[AuthorDownload] 📥 开始保存作者作品:', { uid, nickname });
@@ -206,35 +218,33 @@ export class AuthorDownloadManager {
     }
 
     /**
-     * ✅ 设置作品总数
+     * ✅ 处理 AUTHOR_WORKS_COUNT 消息，初始化作品计数
      * @param {string} uid - 作者ID
-     * @param {number} total - 总作品数
-     * @param {boolean} allDownloaded - 是否所有作品都已下载
+     * @param {number} totalCount - 总作品数
+     * @param {number} skippedCount - 跳过数量（已下载的作品）
      */
-    setTotalWorks(uid, total, allDownloaded = false) {
+    async handleAuthorWorksCount(uid, totalCount, skippedCount = 0) {
         const authorData = this.authorDownloads.get(uid);
-        if (authorData) {
-            authorData.total = total;
-            logger.info('[AuthorDownload] 📊 作品总数:', total);
-            
-            // ✅ 如果作者没有作品，立即标记为完成
-            if (total === 0) {
-                logger.info('[AuthorDownload] ℹ️ 作者没有作品，直接标记为完成');
-                this.finishAuthorDownload(uid);
-                return;
-            }
-            
-            // ✅ 如果所有作品都已下载（Content Script 告知），直接将 completed 设置为 total
-            if (allDownloaded) {
-                authorData.completed = total;
-                logger.info(`[AuthorDownload] ✅ 所有作品已下载，设置 completed = ${total}`);
-            }
-            
-            // ✅ 如果已完成数量 >= 总数，立即标记为完成
-            if (authorData.completed >= total && total > 0) {
-                logger.info(`[AuthorDownload] ✅ 所有作品已保存 (${authorData.completed}/${total})，直接标记为完成`);
-                this.finishAuthorDownload(uid);
-            }
+        if (!authorData) {
+            logger.warn(`[AuthorDownload] ⚠️ 未找到作者下载记录: ${uid}`);
+            return;
+        }
+
+        // ✅ 设置总数和初始完成数
+        authorData.total = totalCount;
+        authorData.completed = skippedCount;
+        
+        logger.info(`[AuthorDownload] 📊 初始化作品计数: 总数 ${totalCount}, 跳过 ${skippedCount}`);
+
+        // ✅ 如果有跳过的作品，更新按钮显示进度
+        if (skippedCount > 0) {
+            this.updateAuthorButtonProgress(authorData);
+        }
+
+        // ✅ 如果所有作品都已跳过，直接标记为完成
+        if (skippedCount === totalCount && totalCount > 0) {
+            logger.info(`[AuthorDownload] ✅ 所有作品已存在，直接标记为完成 (${skippedCount}/${totalCount})`);
+            await this.finishAuthorDownload(uid);
         }
     }
 
@@ -243,7 +253,7 @@ export class AuthorDownloadManager {
      * @param {string} uid - 作者ID
      * @param {boolean} success - 是否成功
      */
-    workCompleted(uid, success = true) {
+    async workCompleted(uid, success = true) {
         const authorData = this.authorDownloads.get(uid);
         if (!authorData) {
             logger.info('[AuthorDownload] ℹ️ 作者作品集的保存记录不存在（可能已提前完成）:', uid);
@@ -267,7 +277,7 @@ export class AuthorDownloadManager {
 
         // ✅ 检查是否全部完成
         if (authorData.completed + authorData.failed >= authorData.total) {
-            this.finishAuthorDownload(uid);
+            await this.finishAuthorDownload(uid);
         }
     }
 
@@ -358,18 +368,6 @@ export class AuthorDownloadManager {
                 logger.info(`[AuthorDownload] ✅ 作者作品保存完成: ${authorData.nickname} (${downloadedCount}/${authorData.total})`);
             }
             
-            // ✅ 发送更新请求到 Content Script
-            window.parent.postMessage({
-                source: 'sidebar',
-                type: 'UPDATE_AUTHOR_DOWNLOAD_STATUS',
-                uid,
-                status,
-                downloadedCount,
-                totalCount: authorData.total
-            }, '*');
-            
-            logger.info(`[AuthorDownload] 📤 已发送状态更新请求: ${uid} -> ${status} (${downloadedCount}/${authorData.total})`);
-            
             // ✅ 同步更新内存中的作者数据（如果存在 followingManager）
             if (this.app.followingManager && this.app.followingManager.allAuthors) {
                 const authorIndex = this.app.followingManager.allAuthors.findIndex(a => a.uid === uid);
@@ -408,12 +406,6 @@ export class AuthorDownloadManager {
                 if (this.app.uiStateManager) {
                     this.app.uiStateManager.setDownloadingState(false);
                 }
-                
-                // ✅ 标记下载结束（通知 Content Script 恢复定时保存）
-                window.parent.postMessage({
-                    source: 'sidebar',
-                    type: 'DOWNLOAD_END'
-                }, '*');
                 
                 logger.info('[AuthorDownload] ✅ 所有作者下载完成，已恢复所有按钮状态');
             } else {

@@ -165,7 +165,7 @@ class PlatformAdapter {
      * @param {Object} metadata - 元数据（包含 isFullyLoaded 标记）
      * @returns {Promise<Array>} 关注列表
      */
-    async getFollowingList(maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.FOLLOWING, onProgress = null, cachedUids = null, metadata = null) {  // ✅ 新增：metadata 参数
+    async getFollowingList(maxCount = CONFIG.FETCH_CONFIG.LIST_CONFIGS.following.maxCount, onProgress = null, cachedUids = null, metadata = null) {  // ✅ 新增：metadata 参数
         if (!this.api.getFollowingList) {
             throw new Error(`当前平台 (${this.currentPlatform}) 不支持获取关注列表`);
         }
@@ -181,7 +181,7 @@ class PlatformAdapter {
      * @param {Object} metadata - 元数据（包含 isFullyLoaded 标记）
      * @returns {Promise<Object>} 包含作品列表和状态的对象
      */
-    async getLikedWorks(maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.LIKED, onProgress = null, cachedWorkIds = null, metadata = null) {  // ✅ 新增：metadata 参数
+    async getLikedWorks(maxCount = CONFIG.FETCH_CONFIG.LIST_CONFIGS.liked.maxCount, onProgress = null, cachedWorkIds = null, metadata = null) {  // ✅ 新增：metadata 参数
         if (!this.api.getLikedWorks) {  // ✅ 改为 getLikedWorks
             throw new Error(`当前平台 (${this.currentPlatform}) 不支持获取点赞列表`);
         }
@@ -197,7 +197,7 @@ class PlatformAdapter {
      * @param {Object} metadata - 元数据（包含 isFullyLoaded 标记）
      * @returns {Promise<Object>} 包含作品列表和状态的对象
      */
-    async getBookmarkedWorks(maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.BOOKMARKED, onProgress = null, cachedWorkIds = null, metadata = null) {  // ✅ 新增：metadata 参数
+    async getBookmarkedWorks(maxCount = CONFIG.FETCH_CONFIG.LIST_CONFIGS.bookmarked.maxCount, onProgress = null, cachedWorkIds = null, metadata = null) {  // ✅ 新增：metadata 参数
         if (!this.api.getBookmarkedWorks) {  // ✅ 改为 getBookmarkedWorks
             throw new Error(`当前平台 (${this.currentPlatform}) 不支持获取收藏列表`);
         }
@@ -212,7 +212,7 @@ class PlatformAdapter {
      * @param {Function} onProgress - 进度回调
      * @returns {Promise<Array>} 作品列表
      */
-    async getAuthorWorksForList(platformId, maxCount = CONFIG.FETCH_CONFIG.LIST_DEFAULTS.AUTHOR_WORKS, onProgress = null) {
+    async getAuthorWorksForList(platformId, maxCount = CONFIG.FETCH_CONFIG.LIST_CONFIGS.following.maxCount, onProgress = null) {
         if (!this.api.getAuthorWorksForList) {
             throw new Error(`当前平台 (${this.currentPlatform}) 不支持获取作者作品列表`);
         }
