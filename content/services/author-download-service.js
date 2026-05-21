@@ -16,6 +16,8 @@ export class AuthorDownloadService {
         this.fileSystem = fileSystem;
         this.currentBatchManager = null;
         this.currentBatchId = null;
+        // ✅ 缓存已下载作品ID（避免批量下载时重复全表扫描）
+        this.cachedDownloadedWorkIds = null;
     }
 
     /**
@@ -102,40 +104,41 @@ export class AuthorDownloadService {
             // 2. 提取作品 ID 列表
             const workIds = works.map(w => w.workId);
             
-            // ✅ 查询已下载的作品ID，过滤掉已完成的（断点续传）
-            const downloadedIdsArray = await database.getDownloadedWorkIds();
-            logger.info(`📊 已下载的作品ID:`, downloadedIdsArray);
-            logger.info(`📊 所有作品ID:`, workIds);
+            // ✅ 从 relations 表获取作者所有作品总数（包括已删除的）
+            const allWorkIdsFromRelations = await relationManager.getAuthorWorkIds(uid);
+            const workCount = allWorkIdsFromRelations.length;
+            logger.info(`📊 relations 表作品总数: ${workCount}`);
             
-            const downloadedIds = new Set(downloadedIdsArray);  // ✅ 转换为 Set
-            const pendingWorkIds = workIds.filter(id => !downloadedIds.has(id));
-            
-            logger.info(`📊 过滤后的作品ID:`, pendingWorkIds);
-            
-            // ✅ 日志提示
-            const skippedCount = workIds.length - pendingWorkIds.length;
-            if (skippedCount > 0) {
-                logger.info(`✅ 共 ${workIds.length} 个作品，${skippedCount} 个已完成，开始下载 ${pendingWorkIds.length} 个`);
-            } else {
-                logger.info(`✅ 开始下载 ${pendingWorkIds.length} 个作品`);
+            // ✅ 使用缓存的已下载作品ID（批量下载时复用）
+            if (!this.cachedDownloadedWorkIds) {
+                const downloadedIdsArray = await database.getDownloadedWorkIds();
+                this.cachedDownloadedWorkIds = new Set(downloadedIdsArray);
+                logger.info(`📦 缓存更新: ${downloadedIdsArray.length} 条记录`);
             }
+            const downloadedIds = this.cachedDownloadedWorkIds;
+            const skippedCount = allWorkIdsFromRelations.filter(id => downloadedIds.has(id)).length;
+            
+            logger.info(`📊 已下载: ${skippedCount}, 待下载: ${workCount - skippedCount}`);
             
             // ✅ 通知 Sidebar 作者作品总数和跳过数量
             iframe.contentWindow.postMessage({
                 source: 'content',
                 type: 'AUTHOR_WORKS_COUNT',
                 uid: uid,
-                count: workIds.length,
+                count: workCount,
                 skippedCount: skippedCount
             }, '*');
             
             // ✅ 如果所有作品都已跳过，直接完成
-            if (pendingWorkIds.length === 0) {
+            if (skippedCount === workCount && workCount > 0) {
                 logger.info(`✅ 所有作品已存在，无需下载`);
                 
                 // ✅ Sidebar 会在 handleAuthorWorksCount 中自动调用 finishAuthorDownload 禁用复选框
                 return;
             }
+            
+            // ✅ 计算待下载的作品ID（从 relations 总数中减去已下载的）
+            const pendingWorkIds = allWorkIdsFromRelations.filter(id => !downloadedIds.has(id));
             
             // 3. 复用现有的批量下载逻辑
             logger.info(`🚀 开始批量下载: ${pendingWorkIds.length} 个作品`);
@@ -228,7 +231,7 @@ export class AuthorDownloadService {
                 type: 'BATCH_DOWNLOAD_COMPLETE',
                 batchId: batchId,
                 result: result,
-                stopped: false  // ✅ 区分正常完成和被停止
+                stopped: result.stopped  // ✅ 使用实际的停止状态
             }, '*');
             
             // ✅ Sidebar 会在 workCompleted 累积计数后自动调用 finishAuthorDownload 禁用复选框

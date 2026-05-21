@@ -27,6 +27,7 @@ export async function saveAuthorsBase(fileSystem, backupManager, authorsData) {
         followingCount: author.followingCount || 0,
         followerCount: author.followerCount || 0,
         workCount: author.workCount || 0,
+        downloadedCount: author.downloadedCount || 0,
         isDeleted: author.isDeleted !== undefined ? author.isDeleted : false,
         order: index
     }));
@@ -94,7 +95,7 @@ export async function loadAuthorsBase(fileSystem) {
  *
  * @param {Object} fileSystem - FileSystem 实例
  * @param {string} uid - 作者ID
- * @returns {Promise<Object|null>} 作者下载状态 { downloadStatus, downloadedCount, totalCount }
+ * @returns {Promise<Object|null>} 作者下载状态 { downloadStatus, downloadedCount, workCount }
  */
 export async function getAuthorDownloadStatus(fileSystem, uid) {
     try {
@@ -102,14 +103,14 @@ export async function getAuthorDownloadStatus(fileSystem, uid) {
         
         // 1. 通过索引查询该作者的所有作品关系
         const relations = await database.getByIndex('relations', 'source', ['author', uid]);
-        const totalCount = relations.length;
+        const workCount = relations.length;
         
-        if (totalCount === 0) {
+        if (workCount === 0) {
             logger.debug(`ℹ️ 作者无作品: ${uid}`);
             return {
                 downloadStatus: 'completed',
                 downloadedCount: 0,
-                totalCount: 0
+                workCount: 0
             };
         }
         
@@ -123,13 +124,13 @@ export async function getAuthorDownloadStatus(fileSystem, uid) {
         // 4. 计算状态
         let downloadStatus = 'pending';
         if (downloadedCount > 0) {
-            downloadStatus = downloadedCount >= totalCount ? 'completed' : 'partial';
+            downloadStatus = downloadedCount >= workCount ? 'completed' : 'partial';
         }
         
         const status = {
             downloadStatus,
             downloadedCount,
-            totalCount
+            workCount
         };
         
         logger.debug(`✅ 查询作者状态: ${uid}, 状态:`, status);

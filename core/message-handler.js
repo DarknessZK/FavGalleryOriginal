@@ -168,11 +168,12 @@ class MessageHandler {
                     break;
                 
                 case 'BATCH_DOWNLOAD_COMPLETE':
-                    this.app.handleBatchDownloadComplete(event.data);
+                    logger.info(`[MessageHandler] 收到 BATCH_DOWNLOAD_COMPLETE: batchId=${event.data.batchId}, stopped=${event.data.stopped}`);
+                    await this.app.handleBatchDownloadComplete(event.data);
                     break;
                 
                 case 'BATCH_DOWNLOAD_ERROR':
-                    this.app.handleBatchDownloadError(event.data);
+                    await this.app.handleBatchDownloadError(event.data);
                     break;
                 
                 // ✅ 作者下载状态查询响应

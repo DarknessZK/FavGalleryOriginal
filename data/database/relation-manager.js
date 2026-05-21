@@ -195,46 +195,6 @@ export async function getWorkCollectIds(workId) {
     }
 }
 
-// ⚠️ 预留功能 - 用于完整性检查
-/**
- * 计算作者的下载进度
- * @param {string} uid - 作者UID
- * @returns {Promise<Object>} 下载进度信息
- */
-export async function calculateAuthorProgress(uid) {
-    try {
-        const workIds = await getAuthorWorkIds(uid);
-
-        if (workIds.length === 0) {
-            return {
-                uid,
-                downloadedCount: 0,
-                totalCount: 0,
-                isPartial: false,
-                downloadedWorkIds: []
-            };
-        }
-
-        const downloadedWorkIds = [];
-        for (const workId of workIds) {
-            const completed = await database.get('completed_works', workId);
-            if (completed) {
-                downloadedWorkIds.push(workId);
-            }
-        }
-
-        return {
-            uid,
-            downloadedWorkIds,
-            downloadedCount: downloadedWorkIds.length,
-            totalCount: workIds.length,
-            isPartial: downloadedWorkIds.length > 0 && downloadedWorkIds.length < workIds.length
-        };
-    } catch (err) {
-        logger.error(`❌ 计算作者进度失败: ${uid}`, err);
-        throw err;
-    }
-}
 
 // ⚠️ 预留功能 - 用于 UI 进度显示
 /**
@@ -306,7 +266,5 @@ export default {
     getAuthorWorkIds,
     getWorkCollectIds,
     getCollectWorkIds,
-    getAuthorGroupIds,         // ✅ 新增：获取作者分组
-    calculateAuthorProgress,
-    calculateCollectProgress
+    getAuthorGroupIds          // ✅ 新增：获取作者分组
 };

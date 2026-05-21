@@ -224,16 +224,18 @@ export class WorkListManager {
 
         const data = this.getCurrentPageData();
 
-        // ✅ 动态导入渲染函数
-        import('./work-helpers.js').then(({ renderWorkList, renderAuthorList }) => {
-            if (this.type === 'following') {
+        // ✅ 动态导入渲染函数（按需加载）
+        if (this.type === 'following') {
+            import('./author-card-renderer.js').then(({ renderAuthorList }) => {
                 // ✅ 渲染作者列表，传递选中状态
                 renderAuthorList(this.elements.list, data, selectedIds);
-            } else {
+            });
+        } else {
+            import('./work-card-renderer.js').then(({ renderWorkList }) => {
                 // 渲染作品列表，传递选中状态
                 renderWorkList(this.elements.list, data, selectedIds);
-            }
-        });
+            });
+        }
     }
 
     /**

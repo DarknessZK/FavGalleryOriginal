@@ -13,6 +13,8 @@ const logger = createLogger('ListDisplayManager');
 class ListDisplayManager {
     constructor(app) {
         this.app = app;
+        // ✅ 缓存已下载作品ID（避免重复全表扫描）
+        this.cachedDownloadedWorkIds = null;
     }
 
     /**
@@ -54,9 +56,10 @@ class ListDisplayManager {
         // ✅ UI 日志
         logToUI('info', `✅ 加载完成: 共 ${total} 个作品`);
 
-        // ✅ 批量查询下载状态
-        const downloadedWorkIds = await this.getDownloadedWorkIds();
-        logger.info(`📋 从数据库查询到 ${downloadedWorkIds.size} 个已下载作品`);
+        // ✅ 刷新缓存的已下载作品ID
+        await this.refreshDownloadedWorkIdsCache();
+        const downloadedWorkIds = this.cachedDownloadedWorkIds;
+        logger.info(`📋 从缓存查询到 ${downloadedWorkIds.size} 个已下载作品`);
 
         // ✅ 合并下载状态到作品数据
         const worksWithStatus = works.map(work => ({
@@ -116,9 +119,9 @@ class ListDisplayManager {
         // ✅ UI 日志
         logToUI('info', `✅ 加载完成: 共 ${total} 个作品`);
 
-        // ✅ 批量查询下载状态
-        const downloadedWorkIds = await this.getDownloadedWorkIds();
-        logger.info(`📋 从数据库查询到 ${downloadedWorkIds.size} 个已下载作品`);
+        // ✅ 使用缓存的已下载作品ID（已在点赞列表加载时刷新）
+        const downloadedWorkIds = this.cachedDownloadedWorkIds;
+        logger.info(`📋 从缓存查询到 ${downloadedWorkIds.size} 个已下载作品`);
 
         // ✅ 合并下载状态到作品数据
         const worksWithStatus = works.map(work => ({
@@ -170,18 +173,40 @@ class ListDisplayManager {
     }
 
     /**
-     * 批量查询已下载的作品 ID
+     * ✅ 刷新缓存的已下载作品ID（列表加载时调用）
      */
-    async getDownloadedWorkIds() {
+    async refreshDownloadedWorkIdsCache() {
         try {
             logger.info(`🔍 开始查询 completed_works 表...`);
             const workIds = await databaseProxy.getDownloadedWorkIds();
-            logger.info(`📦 查询结果: ${workIds.length} 条记录`, workIds.slice(0, 5));
-            return new Set(workIds);
+            this.cachedDownloadedWorkIds = new Set(workIds);
+            logger.info(`📦 缓存更新: ${workIds.length} 条记录`);
         } catch (error) {
             logger.error('❌ 查询下载状态失败:', error);
-            return new Set();
+            this.cachedDownloadedWorkIds = new Set();
         }
+    }
+
+    /**
+     * ✅ 获取缓存的已下载作品ID（作者下载时使用）
+     */
+    getCachedDownloadedWorkIds() {
+        return this.cachedDownloadedWorkIds || new Set();
+    }
+
+    /**
+     * 批量查询已下载的作品 ID（保留兼容，但优先使用缓存）
+     */
+    async getDownloadedWorkIds() {
+        // ✅ 如果缓存存在，直接返回
+        if (this.cachedDownloadedWorkIds) {
+            logger.info(`📋 使用缓存: ${this.cachedDownloadedWorkIds.size} 条记录`);
+            return this.cachedDownloadedWorkIds;
+        }
+        
+        // ❌ 缓存不存在，查询数据库并缓存
+        await this.refreshDownloadedWorkIdsCache();
+        return this.cachedDownloadedWorkIds;
     }
 
     /**
@@ -192,7 +217,8 @@ class ListDisplayManager {
      */
     async refreshListDownloadStatus(manager) {
         try {
-            const downloadedWorkIds = await this.getDownloadedWorkIds();
+            // ✅ 使用缓存的已下载作品ID
+            const downloadedWorkIds = this.cachedDownloadedWorkIds;
 
             // ✅ 更新 allWorks 中每个作品的 isDownloaded 状态
             manager.allWorks.forEach(work => {
@@ -332,6 +358,9 @@ class ListDisplayManager {
 
         // ✅ UI 日志
         logToUI('info', `✅ 加载完成: 共 ${total} 个作者`);
+
+        // ✅ 刷新缓存的已下载作品ID（供作者下载使用）
+        await this.refreshDownloadedWorkIdsCache();
 
         // 设置数据到管理器
         followingManager.setData(authors);

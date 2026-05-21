@@ -548,16 +548,16 @@ class App {
      * ✅ 处理批量下载完成
      * @param {Object} data - 消息数据，包含 batchId 和 result
      */
-    handleBatchDownloadComplete(data) {
-        this.downloadHandler.handleBatchDownloadComplete(data);
+    async handleBatchDownloadComplete(data) {
+        await this.downloadHandler.handleBatchDownloadComplete(data);
     }
 
     /**
      * ✅ 处理批量下载错误
      * @param {Object} data - 消息数据，包含 batchId 和 error
      */
-    handleBatchDownloadError(data) {
-        this.downloadHandler.handleBatchDownloadError(data);
+    async handleBatchDownloadError(data) {
+        await this.downloadHandler.handleBatchDownloadError(data);
     }
 
     /**

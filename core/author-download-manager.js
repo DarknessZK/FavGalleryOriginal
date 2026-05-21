@@ -4,6 +4,7 @@
 // ==========================================
 
 import { createLogger } from '../utils/logger.js';
+import { database } from '../data/database/database.js';
 
 const logger = createLogger('AuthorDownloadManager');
 
@@ -31,15 +32,15 @@ export class AuthorDownloadManager {
             
         // ✅ 检查是否为"继续下载"（partial 状态）- 通过 postMessage 查询
         let initialCompleted = 0;
-        let totalCount = 0;
+        let workCount = 0;
                 
         try {
             // ✅ 通过 postMessage 查询作者状态
             const statusResponse = await this.queryAuthorStatus(uid);
             if (statusResponse && statusResponse.downloadStatus === 'partial') {
                 initialCompleted = statusResponse.downloadedCount || 0;
-                totalCount = statusResponse.totalCount || 0;
-                logger.info(`[AuthorDownload] 🔄 继续下载作者作品 ${nickname}，已完成: ${initialCompleted}/${totalCount}`);
+                workCount = statusResponse.workCount || 0;
+                logger.info(`[AuthorDownload] 🔄 继续下载作者作品 ${nickname}，已完成: ${initialCompleted}/${workCount}`);
             }
         } catch (error) {
             logger.warn('[AuthorDownload] ⚠️ 获取作者作品状态失败，从0开始:', error);
@@ -50,8 +51,8 @@ export class AuthorDownloadManager {
             uid,
             platformId,
             nickname,
-            total: totalCount,
-            completed: initialCompleted,
+            workCount: workCount,
+            downloadedCount: initialCompleted,
             failed: 0,
             button: button,  // ✅ 保存按钮引用
             startTime: Date.now(),
@@ -59,7 +60,7 @@ export class AuthorDownloadManager {
         });
 
         // ✅ 重置按钮UI为"保存中"状态
-        this.resetAuthorButtonUI(button, initialCompleted, totalCount);
+        this.resetAuthorButtonUI(button, initialCompleted, workCount);
 
         // ✅ 禁用所有下载按钮
         this.disableAllDownloadButtons();
@@ -115,9 +116,9 @@ export class AuthorDownloadManager {
      * ✅ 重置作者按钮UI为"保存中"状态
      * @param {HTMLElement} button - 按钮元素
      * @param {number} initialCompleted - 已完成的数量
-     * @param {number} totalCount - 总数量
+     * @param {number} workCount - 总数量
      */
-    resetAuthorButtonUI(button, initialCompleted = 0, totalCount = 0) {
+    resetAuthorButtonUI(button, initialCompleted = 0, workCount = 0) {
         // 清除旧内容
         button.innerHTML = '';
         button.className = 'download-btn';
@@ -128,7 +129,7 @@ export class AuthorDownloadManager {
         button.style.color = '#666';
         
         // 计算初始进度百分比
-        const initialProgress = totalCount > 0 ? Math.round((initialCompleted / totalCount) * 100) : 0;
+        const initialProgress = workCount > 0 ? Math.round((initialCompleted / workCount) * 100) : 0;
         
         // 创建新的进度条
         const progressBar = document.createElement('div');
@@ -220,10 +221,10 @@ export class AuthorDownloadManager {
     /**
      * ✅ 处理 AUTHOR_WORKS_COUNT 消息，初始化作品计数
      * @param {string} uid - 作者ID
-     * @param {number} totalCount - 总作品数
+     * @param {number} workCount - 总作品数
      * @param {number} skippedCount - 跳过数量（已下载的作品）
      */
-    async handleAuthorWorksCount(uid, totalCount, skippedCount = 0) {
+    async handleAuthorWorksCount(uid, workCount, skippedCount = 0) {
         const authorData = this.authorDownloads.get(uid);
         if (!authorData) {
             logger.warn(`[AuthorDownload] ⚠️ 未找到作者下载记录: ${uid}`);
@@ -231,10 +232,10 @@ export class AuthorDownloadManager {
         }
 
         // ✅ 设置总数和初始完成数
-        authorData.total = totalCount;
-        authorData.completed = skippedCount;
+        authorData.workCount = workCount;
+        authorData.downloadedCount = skippedCount;
         
-        logger.info(`[AuthorDownload] 📊 初始化作品计数: 总数 ${totalCount}, 跳过 ${skippedCount}`);
+        logger.info(`[AuthorDownload] 📊 初始化作品计数: 总数 ${workCount}, 跳过 ${skippedCount}`);
 
         // ✅ 如果有跳过的作品，更新按钮显示进度
         if (skippedCount > 0) {
@@ -242,8 +243,8 @@ export class AuthorDownloadManager {
         }
 
         // ✅ 如果所有作品都已跳过，直接标记为完成
-        if (skippedCount === totalCount && totalCount > 0) {
-            logger.info(`[AuthorDownload] ✅ 所有作品已存在，直接标记为完成 (${skippedCount}/${totalCount})`);
+        if (skippedCount === workCount && workCount > 0) {
+            logger.info(`[AuthorDownload] ✅ 所有作品已存在，直接标记为完成 (${skippedCount}/${workCount})`);
             await this.finishAuthorDownload(uid);
         }
     }
@@ -261,13 +262,13 @@ export class AuthorDownloadManager {
         }
 
         // ✅ 防止重复计数
-        if (success && authorData.completed >= authorData.total && authorData.total > 0) {
-            logger.warn(`[AuthorDownload] ⚠️ 已完成数量已达上限，忽略重复消息: ${authorData.completed}/${authorData.total}`);
+        if (success && authorData.downloadedCount >= authorData.workCount && authorData.workCount > 0) {
+            logger.warn(`[AuthorDownload] ⚠️ 已完成数量已达上限，忽略重复消息: ${authorData.downloadedCount}/${authorData.workCount}`);
             return;
         }
 
         if (success) {
-            authorData.completed++;
+            authorData.downloadedCount++;
         } else {
             authorData.failed++;
         }
@@ -276,7 +277,7 @@ export class AuthorDownloadManager {
         this.updateAuthorButtonProgress(authorData);
 
         // ✅ 检查是否全部完成
-        if (authorData.completed + authorData.failed >= authorData.total) {
+        if (authorData.downloadedCount + authorData.failed >= authorData.workCount) {
             await this.finishAuthorDownload(uid);
         }
     }
@@ -289,8 +290,8 @@ export class AuthorDownloadManager {
         if (!authorData.button) return;
 
         const btn = authorData.button;
-        const progress = authorData.total > 0
-            ? Math.round((authorData.completed / authorData.total) * 100)
+        const progress = authorData.workCount > 0
+            ? Math.round((authorData.downloadedCount / authorData.workCount) * 100)
             : 0;
 
         // ✅ 更新进度条宽度
@@ -332,7 +333,7 @@ export class AuthorDownloadManager {
             const textColor = progress > 0 ? 'white' : '#666';
             textSpan.style.color = textColor;
         }
-        textSpan.textContent = `⏳ ${authorData.completed}/${authorData.total}`;
+        textSpan.textContent = `⏳ ${authorData.downloadedCount}/${authorData.workCount}`;
     }
 
     /**
@@ -347,8 +348,8 @@ export class AuthorDownloadManager {
         logger.info('[AuthorDownload] 📊 完成下载 - 诊断信息:', {
             uid,
             nickname: authorData.nickname,
-            completed: authorData.completed,
-            total: authorData.total,
+            downloadedCount: authorData.downloadedCount,
+            workCount: authorData.workCount,
             isInterrupted
         });
 
@@ -358,14 +359,14 @@ export class AuthorDownloadManager {
             
             if (isInterrupted) {
                 status = 'partial';
-                downloadedCount = authorData.completed;
+                downloadedCount = authorData.downloadedCount;
                 
-                logger.info(`[AuthorDownload] ⚠️ 作者作品保存中断: ${authorData.nickname} (${downloadedCount}/${authorData.total})`);
+                logger.info(`[AuthorDownload] ⚠️ 作者作品保存中断: ${authorData.nickname} (${downloadedCount}/${authorData.workCount})`);
             } else {
                 status = 'completed';
-                downloadedCount = authorData.total;
+                downloadedCount = authorData.workCount;
                 
-                logger.info(`[AuthorDownload] ✅ 作者作品保存完成: ${authorData.nickname} (${downloadedCount}/${authorData.total})`);
+                logger.info(`[AuthorDownload] ✅ 作者作品保存完成: ${authorData.nickname} (${downloadedCount}/${authorData.workCount})`);
             }
             
             // ✅ 同步更新内存中的作者数据（如果存在 followingManager）
@@ -375,10 +376,21 @@ export class AuthorDownloadManager {
                 if (authorIndex !== -1) {
                     this.app.followingManager.allAuthors[authorIndex].downloadStatus = status;
                     this.app.followingManager.allAuthors[authorIndex].downloadedCount = downloadedCount;
-                    this.app.followingManager.allAuthors[authorIndex].totalCount = authorData.total;
+                    this.app.followingManager.allAuthors[authorIndex].workCount = authorData.workCount;
                     this.app.followingManager.allAuthors[authorIndex].lastDownloadTime = Date.now();
                     
                     logger.info(`[AuthorDownload] ✅ 已同步更新内存中的作者数据: ${uid}`);
+                    
+                    // ✅ 持久化到数据库
+                    try {
+                        await database.update('authors', uid, {
+                            downloadedCount: downloadedCount,
+                            workCount: authorData.workCount
+                        });
+                        logger.info(`[AuthorDownload] 💾 已持久化作者数据到数据库: ${uid}`);
+                    } catch (error) {
+                        logger.error(`[AuthorDownload] ❌ 持久化作者数据失败:`, error);
+                    }
                     
                     // ✅ 立即更新该作者的UI（使用 authorData.button 引用）
                     if (authorData.button) {
@@ -386,7 +398,7 @@ export class AuthorDownloadManager {
                         logger.info(`[AuthorDownload] 🎨 已通过 button 引用更新UI: ${uid}`);
                     } else {
                         // 降级方案：通过 UID 查找
-                        this.updateAuthorCardUI(uid, status, downloadedCount, authorData.total);
+                        this.updateAuthorCardUI(uid, status, downloadedCount, authorData.workCount);
                     }
                 }
             }
@@ -476,9 +488,9 @@ export class AuthorDownloadManager {
      * @param {string} uid - 作者ID
      * @param {string} status - 状态
      * @param {number} downloadedCount - 已下载数量
-     * @param {number} totalCount - 总数量
+     * @param {number} workCount - 总数量
      */
-    updateAuthorCardUI(uid, status, downloadedCount, totalCount) {
+    updateAuthorCardUI(uid, status, downloadedCount, workCount) {
         const listEl = document.getElementById('followingList');
         if (!listEl) return;
         
@@ -500,7 +512,7 @@ export class AuthorDownloadManager {
                 downloadBtn.style.cursor = 'not-allowed';
             } else if (status === 'partial') {
                 downloadBtn.className = 'download-btn btn partial';
-                downloadBtn.innerHTML = `<span class="btn-text">⚠️ ${downloadedCount}/${totalCount}</span>`;
+                downloadBtn.innerHTML = `<span class="btn-text">⚠️ ${downloadedCount}/${workCount}</span>`;
                 downloadBtn.disabled = false;
                 downloadBtn.style.opacity = '1';
                 downloadBtn.style.cursor = 'pointer';
