@@ -259,6 +259,7 @@ createdAt: 1713801600000
 | followingCount | number | 是 | 关注数 |
 | followerCount | number | 是 | 粉丝数 |
 | workCount | number | 是 | 作品数（缓存字段） |
+| downloadedCount | number | 是 | 已下载作品数（缓存字段，默认 0） |
 | isDeleted | boolean | 是 | 软删除标记（默认 false） |
 
 **示例数据：**

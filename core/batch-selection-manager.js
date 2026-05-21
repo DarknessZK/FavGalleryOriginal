@@ -321,11 +321,6 @@ class BatchSelectionManager {
      * 清空选择
      */
     clearSelection(listType) {
-        console.log('[DEBUG] ===== clearSelection START =====');
-        console.trace('[DEBUG] clearSelection call stack');
-        console.log('[DEBUG] clearSelection called:', listType);
-        console.log('[DEBUG] before clear - selectedAuthorIds:', Array.from(this.state.following?.selectedAuthorIds || []));
-        
         const state = this.state[listType];
         if (!state) return;
         

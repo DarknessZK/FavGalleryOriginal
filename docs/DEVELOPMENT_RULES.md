@@ -679,7 +679,7 @@ window.parent.postMessage({
 | `BATCH_DOWNLOAD_PROGRESS` | `batchId`, `progress` | 批量下载进度 |
 | `BATCH_DOWNLOAD_COMPLETE` | `batchId`, `result`, `stopped` | 批量下载完成 |
 | `BATCH_DOWNLOAD_ERROR` | `batchId`, `error` | 批量下载错误 |
-| `AUTHOR_WORKS_COUNT` | `uid`, `count` | 作者作品数量统计 |
+| `AUTHOR_WORKS_COUNT` | `uid`, `count`, `skippedCount` | 作者作品数量统计（count=总数，skippedCount=已下载数） |
 | `AUTHOR_WORK_PROGRESS` | `uid`, `workId`, `status` | 作者作品下载进度 |
 | `AUTHOR_DOWNLOAD_COMPLETED` | `uid` | 作者下载完成，禁用复选框 |
 | `DB_RESPONSE_GET_DOWNLOADED_WORK_IDS` | `workIds` | 数据库查询响应 |

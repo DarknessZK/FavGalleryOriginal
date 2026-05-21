@@ -533,7 +533,7 @@ class DownloadHandler {
      * ✅ 处理批量下载完成
      * @param {Object} data - 消息数据，包含 batchId 和 result
      */
-    handleBatchDownloadComplete(data) {
+    async handleBatchDownloadComplete(data) {
         const { batchId, result } = data;
         
         logger.info(`✅ 批量下载完成: 成功 ${result.progress.success}, 失败 ${result.progress.failed}`);
@@ -561,6 +561,15 @@ class DownloadHandler {
             }
         }
         
+        // ✅ 如果是作者下载，调用 finishAuthorDownload 更新数据库
+        if (batchId && batchId.startsWith('author_')) {
+            const uid = batchId.split('_')[2]; // 从 author_single_UID_TIMESTAMP 提取 UID
+            if (uid && this.app.authorDownloadManager) {
+                await this.app.authorDownloadManager.finishAuthorDownload(uid, result.stopped);
+                logger.info(`[DownloadHandler] ✅ 已调用 finishAuthorDownload: ${uid}`);
+            }
+        }
+        
         // ✅ 重置状态
         this.resetDownloadState();
     }
@@ -569,7 +578,7 @@ class DownloadHandler {
      * ✅ 处理批量下载错误
      * @param {Object} data - 消息数据，包含 batchId 和 error
      */
-    handleBatchDownloadError(data) {
+    async handleBatchDownloadError(data) {
         const { batchId, error } = data;
         
         logger.error(`❌ 批量下载错误: ${error}`);
@@ -584,6 +593,15 @@ class DownloadHandler {
                 `❌ 失败: ${error}`,
                 '#ff4d4f'
             );
+        }
+        
+        // ✅ 如果是作者下载，调用 finishAuthorDownload 更新数据库
+        if (batchId && batchId.startsWith('author_')) {
+            const uid = batchId.split('_')[2]; // 从 author_single_UID_TIMESTAMP 提取 UID
+            if (uid && this.app.authorDownloadManager) {
+                await this.app.authorDownloadManager.finishAuthorDownload(uid, true);
+                logger.info(`[DownloadHandler] ✅ 已调用 finishAuthorDownload（错误）: ${uid}`);
+            }
         }
         
         // ✅ 重置状态
