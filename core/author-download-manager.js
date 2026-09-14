@@ -370,27 +370,16 @@ export class AuthorDownloadManager {
             }
             
             // ✅ 同步更新内存中的作者数据（如果存在 followingManager）
+            let fullAuthor = null;
             if (this.app.followingManager && this.app.followingManager.allAuthors) {
                 const authorIndex = this.app.followingManager.allAuthors.findIndex(a => a.uid === uid);
                 
                 if (authorIndex !== -1) {
-                    this.app.followingManager.allAuthors[authorIndex].downloadStatus = status;
                     this.app.followingManager.allAuthors[authorIndex].downloadedCount = downloadedCount;
                     this.app.followingManager.allAuthors[authorIndex].workCount = authorData.workCount;
-                    this.app.followingManager.allAuthors[authorIndex].lastDownloadTime = Date.now();
+                    fullAuthor = this.app.followingManager.allAuthors[authorIndex];
                     
                     logger.info(`[AuthorDownload] ✅ 已同步更新内存中的作者数据: ${uid}`);
-                    
-                    // ✅ 持久化到数据库
-                    try {
-                        await database.update('authors', uid, {
-                            downloadedCount: downloadedCount,
-                            workCount: authorData.workCount
-                        });
-                        logger.info(`[AuthorDownload] 💾 已持久化作者数据到数据库: ${uid}`);
-                    } catch (error) {
-                        logger.error(`[AuthorDownload] ❌ 持久化作者数据失败:`, error);
-                    }
                     
                     // ✅ 立即更新该作者的UI（使用 authorData.button 引用）
                     if (authorData.button) {
@@ -400,6 +389,30 @@ export class AuthorDownloadManager {
                         // 降级方案：通过 UID 查找
                         this.updateAuthorCardUI(uid, status, downloadedCount, authorData.workCount);
                     }
+                }
+            }
+            
+            // ✅ 持久化到数据库（save = upsert，传入完整对象）
+            // 优先使用内存中的完整作者对象；关注列表未加载时回退到数据库已有记录合并
+            if (!fullAuthor) {
+                try {
+                    const existing = await database.get('authors', uid);
+                    fullAuthor = existing
+                        ? { ...existing, downloadedCount, workCount }
+                        : { uid, downloadedCount, workCount };
+                } catch (error) {
+                    logger.warn(`[AuthorDownload] ⚠️ 读取数据库作者记录失败，跳过持久化: ${uid}`, error.message);
+                }
+            }
+            
+            if (fullAuthor) {
+                try {
+                    await database.save('authors', fullAuthor);
+                    logger.info(`[AuthorDownload] 💾 已持久化作者数据到数据库: ${uid}`, {
+                        downloadedCount, workCount: authorData.workCount
+                    });
+                } catch (error) {
+                    logger.error(`[AuthorDownload] ❌ 持久化作者数据失败:`, error);
                 }
             }
         } catch (error) {

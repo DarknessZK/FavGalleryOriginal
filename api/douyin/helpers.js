@@ -144,7 +144,6 @@ export function getUserInfoFromPage() {
         // 处理获取到的用户信息
         if (userInfo && userInfo.uid) {
             const result = normalizeUserInfo(userInfo);
-
             logger.info(`✅ 用户信息获取成功 (${successMethod}):`, result.nickname, {
                 uid: result.uid,
                 followingCount: result.followingCount,
@@ -188,11 +187,11 @@ function normalizeUserInfo(rawInfo) {
 
     return {
         uid: rawInfo.uid,
-        platformId: rawInfo.sec_uid || '',  // ✅ 只保留 sec_uid（抖音 API 实际返回）
-        uniqueId: rawInfo.unique_id || rawInfo.short_id || '',  // ✅ 只保留下划线命名
+        platformId: rawInfo.secUid ?? '',// ✅ 只保留 sec_uid（抖音 API 实际返回）
+        uniqueId: rawInfo.uniqueId ?? '',
         nickname: rawInfo.nickname || '未知用户',
-        favoritingCount: rawInfo.favoriting_count || 0,  // ✅ 只保留下划线命名
-        followingCount: rawInfo.following_count || 0,  // ✅ 只保留下划线命名
+        favoritingCount: rawInfo.favoritingCount ?? 0,
+        followingCount: rawInfo.followingCount ?? 0,
         collectCount
     };
 }

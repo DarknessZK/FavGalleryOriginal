@@ -563,7 +563,10 @@ class DownloadHandler {
         
         // ✅ 如果是作者下载，调用 finishAuthorDownload 更新数据库
         if (batchId && batchId.startsWith('author_')) {
-            const uid = batchId.split('_')[2]; // 从 author_single_UID_TIMESTAMP 提取 UID
+            // author_single_UID_TIMESTAMP → parts[2] = UID
+            // author_batch_TIMESTAMP_UID  → parts[3] = UID
+            const parts = batchId.split('_');
+            const uid = parts[1] === 'single' ? parts[2] : parts[3];
             if (uid && this.app.authorDownloadManager) {
                 await this.app.authorDownloadManager.finishAuthorDownload(uid, result.stopped);
                 logger.info(`[DownloadHandler] ✅ 已调用 finishAuthorDownload: ${uid}`);
@@ -597,7 +600,10 @@ class DownloadHandler {
         
         // ✅ 如果是作者下载，调用 finishAuthorDownload 更新数据库
         if (batchId && batchId.startsWith('author_')) {
-            const uid = batchId.split('_')[2]; // 从 author_single_UID_TIMESTAMP 提取 UID
+            // author_single_UID_TIMESTAMP → parts[2] = UID
+            // author_batch_TIMESTAMP_UID  → parts[3] = UID
+            const parts = batchId.split('_');
+            const uid = parts[1] === 'single' ? parts[2] : parts[3];
             if (uid && this.app.authorDownloadManager) {
                 await this.app.authorDownloadManager.finishAuthorDownload(uid, true);
                 logger.info(`[DownloadHandler] ✅ 已调用 finishAuthorDownload（错误）: ${uid}`);

@@ -168,7 +168,7 @@ class BatchSelectionManager {
             
             // ✅ 只检查可选的项目是否都被选中
             const selectableCurrentIds = currentPageItems
-                .filter(item => !(item.workCount === 0 || item.downloadStatus === 'completed'))
+                .filter(item => !(item.workCount === 0 || item.downloadedCount >= item.workCount))
                 .map(item => item.uid);
             const allChecked = selectableCurrentIds.length > 0 && selectableCurrentIds.every(id => state.selectedAuthorIds.has(id));
             
@@ -185,7 +185,7 @@ class BatchSelectionManager {
                 
                 // ✅ 过滤掉禁用的作者（无作品或已完成下载）
                 const selectableItems = currentPageItems.filter(item => {
-                    return !(item.workCount === 0 || item.downloadStatus === 'completed');
+                    return !(item.workCount === 0 || item.downloadedCount >= item.workCount);
                 });
                 
                 selectableItems.forEach(item => {
@@ -244,7 +244,7 @@ class BatchSelectionManager {
             
             // ✅ 只检查可选的项目是否都被选中
             const selectableAllIds = allItems
-                .filter(item => !(item.workCount === 0 || item.downloadStatus === 'completed'))
+                .filter(item => !(item.workCount === 0 || item.downloadedCount >= item.workCount))
                 .map(item => item.uid);
             const allChecked = selectableAllIds.length > 0 && selectableAllIds.every(id => state.selectedAuthorIds.has(id));
             logger.info(`📋 following - selectableAllIds.length=${selectableAllIds.length}, allChecked=${allChecked}`);
@@ -263,7 +263,7 @@ class BatchSelectionManager {
                 
                 // ✅ 过滤掉禁用的作者（无作品或已完成下载）
                 const selectableItems = allItems.filter(item => {
-                    return !(item.workCount === 0 || item.downloadStatus === 'completed');
+                    return !(item.workCount === 0 || item.downloadedCount >= item.workCount);
                 });
                 
                 selectableItems.forEach(item => {
@@ -274,7 +274,7 @@ class BatchSelectionManager {
                 
                 const currentPageItems = this.getCurrentPageItems(listType, allItems);
                 const selectableCurrentIds = currentPageItems
-                    .filter(item => !(item.workCount === 0 || item.downloadStatus === 'completed'))
+                    .filter(item => !(item.workCount === 0 || item.downloadedCount >= item.workCount))
                     .map(item => item.uid);
                 this.syncCheckboxes(listType, selectableCurrentIds);
             }

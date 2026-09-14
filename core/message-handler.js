@@ -23,7 +23,11 @@ class MessageHandler {
                 return;
             }
 
-            logger.info('📨 收到消息:', event.data.type);
+            // ✅ 高频消息不输出“收到消息”日志，防止日志洪泛
+            const silentTypes = ['BATCH_DOWNLOAD_PROGRESS', 'AUTHOR_WORK_PROGRESS', 'LIKED_WORKS_PROGRESS', 'FOLLOWING_AUTHORS_PROGRESS', 'COLLECT_WORKS_PROGRESS', 'UI_LOG'];
+            if (!silentTypes.includes(event.data.type)) {
+                logger.info('📨 收到消息:', event.data.type);
+            }
 
             switch (event.data.type) {
                 case 'USER_INFO':

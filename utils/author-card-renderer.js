@@ -48,8 +48,7 @@ function createAuthorCardHTML(author, selectedAuthorIds = null) {
     const platformId = author.platformId || '';
     const authorUrl = platformId ? `https://www.douyin.com/user/${platformId}` : '';
     
-    // 下载状态
-    const downloadStatus = author.downloadStatus || 'pending';
+    // 下载状态（动态计算，不存储 downloadStatus 字段）
     const downloadedCount = author.downloadedCount || 0;
     const workCount = author.workCount || 0;
     
@@ -59,13 +58,14 @@ function createAuthorCardHTML(author, selectedAuthorIds = null) {
     let buttonDisabled = false;
     let buttonClass = 'download-btn';
     
-    // 优先判断：如果没有作品，直接显示已保存
-    if (workCount === 0 ) {
+    // 优先判断：如果无作品或全部已下载，显示已完成
+    if (workCount === 0 || downloadedCount >= workCount) {
         buttonText = '✅ 已保存';
         buttonStyle = 'background: #52c41a; cursor: default; text-align: center;';
         buttonDisabled = true;
         buttonClass = 'download-btn completed';
-    } else if (downloadStatus === 'partial') {
+    } else if (downloadedCount > 0) {
+        // 部分下载完成
         buttonText = `⚠️ ${downloadedCount}/${workCount}`;
         buttonStyle = 'background: #faad14; text-align: center;';
         buttonClass = 'download-btn partial';

@@ -353,7 +353,7 @@ export class DouyinAPI {
 
         // 使用通用智能增量获取函数
         try {
-            const users = await smartIncrementalFetch(
+            const { items: users, hasMore } = await smartIncrementalFetch(
                 fetchBatch,
                 cachedIds,
                 'uid',
@@ -370,7 +370,7 @@ export class DouyinAPI {
             // ✅ 统一返回格式：使用 authors 字段（跨平台通用）
             return { 
                 authors: users,  // ✅ 统一使用 authors 字段
-                hasMore: true, 
+                hasMore,  // ✅ 使用真实的 hasMore（维持 isFullyLoaded 语义）
                 cursor: maxCursor, 
                 requestedCount: maxCount 
             };
@@ -467,7 +467,7 @@ export class DouyinAPI {
 
         // 使用通用智能增量获取函数
         try {
-            const works = await smartIncrementalFetch(  // ✅ 改为 works
+            const { items: works, hasMore } = await smartIncrementalFetch(  // ✅ 改为 works
                 fetchBatch,
                 cachedIds,
                 'workId',
@@ -481,7 +481,7 @@ export class DouyinAPI {
 
             logger.info(`[点赞列表] 获取 ${works.length} 个作品`);  // ✅ 改为 works
 
-            return { works, hasMore: true, cursor: maxCursor, requestedCount: maxCount };  // ✅ 添加 requestedCount
+            return { works, hasMore, cursor: maxCursor, requestedCount: maxCount };  // ✅ hasMore 使用真实值
 
         } catch (error) {
             logger.error('获取点赞列表失败:', error);
@@ -574,7 +574,7 @@ export class DouyinAPI {
 
         // 使用通用智能增量获取函数
         try {
-            const works = await smartIncrementalFetch(  // ✅ 改为 works
+            const { items: works, hasMore } = await smartIncrementalFetch(  // ✅ 改为 works
                 fetchBatch,
                 cachedIds,
                 'workId',
@@ -590,7 +590,7 @@ export class DouyinAPI {
 
             return {
                 works,  // ✅ 改为 works
-                hasMore: true,
+                hasMore,  // ✅ hasMore 使用真实值
                 cursor: maxCursor,
                 requestedCount: maxCount  // ✅ 新增：添加 requestedCount
             };
@@ -979,7 +979,7 @@ export class DouyinAPI {
         
         // 使用通用智能增量获取函数
         try {
-            const works = await smartIncrementalFetch(
+            const { items: works, hasMore } = await smartIncrementalFetch(
                 fetchBatch,
                 cachedIds,
                 'workId',
@@ -993,7 +993,7 @@ export class DouyinAPI {
             
             logger.info(`[收藏夹] 获取 ${works.length} 个作品`);
             
-            return { works, hasMore: true, cursor };
+            return { works, hasMore, cursor };
             
         } catch (error) {
             logger.error('获取收藏夹作品失败:', error);
