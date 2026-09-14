@@ -29,7 +29,7 @@ const logger = createLogger('Helpers');
  * @param {number} extraOptions.delayMs - 请求间隔延迟（毫秒）
  * @param {number} extraOptions.maxRetries - 最大重试次数
  * @param {boolean} extraOptions.isFullyLoaded - 是否曾经完整加载过（用于控制早期退出）
- * @returns {Promise<Array>} 获取的所有数据（已去重）
+ * @returns {Promise<Object>} { items: 原始拉取窗口（含缓存命中项，保持 API 新→旧顺序）, hasMore: 列表是否未拉取完整 }
  */
 export async function smartIncrementalFetch(
     fetchFn,
@@ -50,19 +50,26 @@ export async function smartIncrementalFetch(
     let cursor = 0;
     let currentRetry = 0;
     let newCount = 0; // 新增数据计数
+    let rawFetched = 0; // ✅ 原始拉取总数（含被过滤的缓存重复项）
 
-    while (hasMore && allData.length < maxCount) {
+    // ✅ 停止条件按“原始拉取总数”判断：maxCount 限制的是 API 拉取量，而非新增数量
+    while (hasMore && rawFetched < maxCount) {
         try {
-            logger.debug(`🔄 开始第 ${Math.ceil(allData.length / 20) + 1} 批获取，cursor=${cursor}`);
+            logger.debug(`🔄 开始第 ${Math.ceil(rawFetched / 20) + 1} 批获取，cursor=${cursor}`);
             
             const result = await fetchFn(cursor);
 
-            if (!result || !result.data) {
+            if (!result || !result.data || result.data.length === 0) {
                 logger.warn('⚠️ 获取数据为空');
+                hasMore = false;
                 break;
             }
 
-            // ✅ 去重逻辑：过滤掉已存在的 ID
+            // ✅ 累计原始拉取数（去重前的真实 API 返回量）
+            rawFetched += result.data.length;
+
+            // ✅ 过滤仅用于统计新增数量和检测早期退出，不用于返回值：
+            // 返回完整的新→旧窗口（含缓存命中项），合并时才能恢复正确顺序
             let newData = result.data;
             if (cachedIds && cachedIds.size > 0) {
                 newData = result.data.filter(item => !cachedIds.has(item[idField]));
@@ -77,30 +84,33 @@ export async function smartIncrementalFetch(
             if (isFullyLoaded && hasCachedItem) {
                 logger.info(`✅ 检测到已缓存作品（本批 ${result.data.length} 个中有 ${result.data.length - newData.length} 个已缓存），提前停止获取`);
                 
-                // 合并当前批的新作品
+                // 追加本批原始数据（含缓存命中项），保持窗口顺序完整
                 newCount += newData.length;
-                allData = allData.concat(newData);
+                allData = allData.concat(result.data);
+                // ✅ 提前退出时缓存完整性保持（新数据只会出现在头部），返回 hasMore: false 维持 isFullyLoaded
+                hasMore = false;
                 break;
             }
 
             // 统计新增数量
             newCount += newData.length;
 
-            // 合并数据
-            allData = allData.concat(newData);
+            // ✅ 追加本批原始数据（含缓存命中项）：API 新→旧顺序是合并排序的依据，
+            // 若只保留新增项，缓存命中项的“坑位”会丢失，导致合并后顺序错乱
+            allData = allData.concat(result.data);
             hasMore = result.hasMore;
             cursor = result.cursor || 0;
 
             // 重置重试计数
             currentRetry = 0;
 
-            // ✅ P1: 调用进度回调（只传递当前累计数量和最大目标）
+            // ✅ P1: 调用进度回调（按原始拉取数对比目标量）
             if (onProgress) {
-                onProgress(allData.length, maxCount);
+                onProgress(Math.min(rawFetched, maxCount), maxCount);
             }
 
-            // 如果已满足需求或没有更多数据，退出
-            if (!hasMore || allData.length >= maxCount) {
+            // 如果已满足需求或没有更多数据，退出（达到 maxCount 上限时 hasMore 保持 true，表示还有未拉取数据）
+            if (!hasMore || rawFetched >= maxCount) {
                 break;
             }
 
@@ -127,8 +137,8 @@ export async function smartIncrementalFetch(
         }
     }
 
-    logger.info(`✅ 智能增量获取完成: 新增 ${newCount} 条，总计 ${allData.length} 条数据`);
-    return allData.slice(0, maxCount);
+    logger.info(`✅ 智能增量获取完成: 新增 ${newCount} 条，总计 ${allData.length} 条数据（原始拉取 ${rawFetched} 条，hasMore=${hasMore}）`);
+    return { items: allData.slice(0, maxCount), hasMore };
 }
 
 /**

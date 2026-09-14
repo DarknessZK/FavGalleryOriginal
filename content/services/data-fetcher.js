@@ -139,20 +139,26 @@ export class DataFetcher {
         const apiItems = apiResult[config.resultKey] || [];
         logger.info(`✅ API 返回 ${apiItems.length} 个${config.saveKey === 'collects' ? '收藏夹' : config.saveKey === 'authors' ? '作者' : '作品'}`);
         
-        // 5. 合并数据（支持软删除）
+        // 5. 合并数据（支持软删除，以 API 顺序为准）
+        // ✅ smartIncrementalFetch 返回完整的新→旧窗口（含缓存命中项），
+        // 合并后自然保持 API 排序（点赞列表按点赞时间，而非作品发布时间），不能按 createTime 排序
         const mergedData = this._mergeItems(cachedItems, apiItems, config.idField);
-        logger.info(`✅ 合并后共 ${mergedData.length} 个${config.saveKey === 'collects' ? '收藏夹' : config.saveKey === 'authors' ? '作者' : '作品'}`);
+        
+        // ✅ 按 maxCount 截断：批次粒度会超额拉取，超出目标量的旧数据不进列表
+        const effectiveMaxCount = extraParams.maxCount || config.maxCount;
+        const cappedData = mergedData.slice(0, effectiveMaxCount);
+        logger.info(`✅ 合并后共 ${cappedData.length} 个${config.saveKey === 'collects' ? '收藏夹' : config.saveKey === 'authors' ? '作者' : '作品'}（合并 ${mergedData.length} 个，上限 ${effectiveMaxCount}）`);
         
         // 6. 保存数据（配置驱动）
         await this._saveList(listType, {
             apiItems,
-            mergedData,
+            mergedData: cappedData,
             metadata,
             apiResult,
             ...extraParams
         });
         
-        return mergedData;
+        return cappedData;
     }
     
     /**
@@ -247,32 +253,36 @@ export class DataFetcher {
      * @returns {Array} 合并后的数据
      */
     _mergeItems(cached, api, idField) {
-        const itemMap = new Map();
-        
-        // 先加入缓存数据
+        const cachedMap = new Map();
         cached.forEach(item => {
-            itemMap.set(item[idField], { ...item });
+            cachedMap.set(item[idField], item);
         });
         
-        // API数据覆盖或新增（设置 isDeleted: false）
-        api.forEach(item => {
-            itemMap.set(item[idField], { ...item, isDeleted: false });
-        });
-        
-        // ✅ 标记已删除的（软删除）
-        // API 中没有但缓存中有的 → 标记 isDeleted: true
         const apiIds = new Set(api.map(item => item[idField]));
+        const merged = [];
+        
+        // ✅ 以 API 返回顺序（新→旧）构建结果，保证新增数据排在最前
+        // API 数据提供基础字段，缓存中的扩展字段（如 downloadedCount）优先保留
+        api.forEach(item => {
+            const cachedItem = cachedMap.get(item[idField]);
+            merged.push({
+                ...item,
+                ...cachedItem,
+                isDeleted: false
+            });
+        });
+        
+        // ✅ 仅在缓存中的数据（本次 API 窗口未覆盖）追加到末尾，并标记软删除
         cached.forEach(item => {
-            if (!apiIds.has(item[idField]) && !item.isDeleted) {
-                const existing = itemMap.get(item[idField]);
-                if (existing) {
-                    existing.isDeleted = true;
+            if (!apiIds.has(item[idField])) {
+                if (!item.isDeleted) {
                     logger.debug(`🗑️ 标记为已删除: ${item[idField]}`);
                 }
+                merged.push({ ...item, isDeleted: true });
             }
         });
         
-        return Array.from(itemMap.values());
+        return merged;
     }
     
     /**

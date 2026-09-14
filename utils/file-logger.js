@@ -27,6 +27,11 @@ class FileLogger {
         this.sidebarFlushTimer = null;
         this.SIDEBAR_FLUSH_INTERVAL = 3000; // 每 3 秒刷新一次
         
+        // ✅ 频率限制：防止日志洪泛导致控制台卡死
+        this.SIDEBAR_MAX_QUEUE_SIZE = 500;       // 队列上限，超出丢弃最旧日志
+        this.SIDEBAR_MIN_FLUSH_INTERVAL = 5000; // 最小刷新间隔（毫秒）
+        this.lastSidebarFlushTime = 0;
+        
         // ✅ 文件夹选择状态（Sidebar 环境）
         this.folderSelected = false;
     }
@@ -284,6 +289,19 @@ class FileLogger {
      */
     async flushSidebarLogs() {
         if (this.sidebarLogQueue.length === 0) return;
+        
+        // ✅ 频率限制：距上次刷新不足最小间隔时跳过（定时器触发除外）
+        const now = Date.now();
+        if (now - this.lastSidebarFlushTime < this.SIDEBAR_MIN_FLUSH_INTERVAL) {
+            return;
+        }
+        this.lastSidebarFlushTime = now;
+        
+        // ✅ 队列超限时丢弃最旧的日志，防止内存溢出
+        if (this.sidebarLogQueue.length > this.SIDEBAR_MAX_QUEUE_SIZE) {
+            const dropped = this.sidebarLogQueue.length - this.SIDEBAR_MAX_QUEUE_SIZE;
+            this.sidebarLogQueue.splice(0, dropped);
+        }
         
         const logsToSend = [...this.sidebarLogQueue];
         this.sidebarLogQueue = [];

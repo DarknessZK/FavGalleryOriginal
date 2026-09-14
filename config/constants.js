@@ -183,7 +183,7 @@ export const CONFIG = {
         /** ✅ 列表基础配置 - 纯数据配置（不含方法） */
         LIST_CONFIGS: {
             liked: {
-                maxCount: 100,
+                maxCount: 120,
                 folderRequired: true,
                 skipIncrementalCheck: false,
                 saveKey: 'works',  // ✅ 保存时的字段名
@@ -358,7 +358,7 @@ export const CONFIG = {
         name: 'FavGallery',
         
         /** 数据库版本 */
-        version: 2,
+        version: 1,
         
         /**
          * 对象存储配置
