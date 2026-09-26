@@ -103,13 +103,13 @@ function createAuthorCardHTML(author, selectedAuthorIds = null) {
                         🆔 ${escapeHtml(uniqueId)}
                     </div>
                 ` : ''}
-                <div style="font-size: 12px; color: #999; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(signature)}">
+                <div style="font-size: 12px; color: #999; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" data-tip="${escapeHtml(signature)}">
                     ${escapeHtml(signature)}
                 </div>
                 <div style="font-size: 11px; color: #999;">
                     👥 ${formatNumber(followerCount)} 粉丝 | 
                     👤 ${formatNumber(followingCount)} 关注 | 
-                    🎬 已存${author.downloadedCount || 0}/${formatNumber(workCount)}作品
+                    🎬 已存<span class="author-saved-count">${author.downloadedCount || 0}/${formatNumber(workCount)}</span>作品<span class="author-tip-icon" data-tip="已保存作品数 / 作品总数。总数取自抖音关注列表接口，可能略少于作者主页实际作品数；完成下载后会以实际下载数量校正。" style="display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;margin-left:3px;border-radius:50%;border:1px solid #bbb;color:#999;font-size:10px;line-height:1;vertical-align:middle;flex-shrink:0;">?</span>
                 </div>
                 <div style="margin-top: 8px; display: flex; gap: 4px; align-items: center;">
                     ${authorUrl ? `
@@ -153,6 +153,70 @@ function createAuthorCardHTML(author, selectedAuthorIds = null) {
     `;
 }
 
+// ==========================================
+// 自定义悬浮提示（替代原生 title：即时显示、不改鼠标、不被列表容器裁剪）
+// ==========================================
+
+/**
+ * 惰性初始化全局悬浮提示浮层。
+ * - 用 position:fixed 浮层承载 [data-tip] 文本，规避 #followingList 的 overflow 裁剪；
+ * - mouseover 即时显示（无原生 title 的秒级延迟），且不改变鼠标样式；
+ * - 幂等：多次调用仅初始化一次。
+ */
+let _hoverTipEl = null;
+function _ensureHoverTooltip() {
+    if (_hoverTipEl || typeof document === 'undefined' || !document.body) return;
+
+    const tip = document.createElement('div');
+    tip.className = 'fg-hover-tip';
+    tip.style.cssText = [
+        'position:fixed', 'z-index:2147483647', 'max-width:240px',
+        'padding:6px 10px', 'background:rgba(0,0,0,.85)', 'color:#fff',
+        'font-size:12px', 'line-height:1.5', 'border-radius:6px',
+        'box-shadow:0 2px 8px rgba(0,0,0,.25)', 'pointer-events:none',
+        'white-space:normal', 'word-break:break-word',
+        'left:0', 'top:0', 'opacity:0', 'visibility:hidden'
+    ].join(';');
+    document.body.appendChild(tip);
+    _hoverTipEl = tip;
+
+    function show(target) {
+        const text = target.getAttribute('data-tip');
+        if (!text) return;
+        tip.textContent = text;
+        tip.style.visibility = 'visible';
+        tip.style.opacity = '1';
+        const r = target.getBoundingClientRect();
+        const tw = tip.offsetWidth;
+        const th = tip.offsetHeight;
+        const gap = 8;
+        let left = r.left + r.width / 2 - tw / 2;
+        left = Math.max(gap, Math.min(left, window.innerWidth - tw - gap));
+        let top = r.bottom + 6;
+        if (top + th > window.innerHeight - gap) {
+            top = r.top - th - 6; // 下方空间不足则改显示在上方
+        }
+        tip.style.left = left + 'px';
+        tip.style.top = Math.max(gap, top) + 'px';
+    }
+
+    function hide() {
+        tip.style.opacity = '0';
+        tip.style.visibility = 'hidden';
+    }
+
+    document.addEventListener('mouseover', function (e) {
+        const el = e.target.closest && e.target.closest('[data-tip]');
+        if (el) show(el);
+    });
+    document.addEventListener('mouseout', function (e) {
+        const el = e.target.closest && e.target.closest('[data-tip]');
+        if (el) hide();
+    });
+    // 列表滚动时浮层不跟随，直接隐藏避免错位
+    document.addEventListener('scroll', hide, true);
+}
+
 /**
  * 渲染作者列表
  * @param {HTMLElement} listEl - 列表容器元素
@@ -160,6 +224,7 @@ function createAuthorCardHTML(author, selectedAuthorIds = null) {
  * @param {Set} selectedAuthorIds - 选中的作者UID集合（可选）
  */
 export function renderAuthorList(listEl, authors, selectedAuthorIds = null) {
+    _ensureHoverTooltip(); // ✅ 惰性初始化自定义悬浮提示（即时显示，替代原生 title 延迟）
     if (!listEl) {
         logger.warn('⚠️ 列表容器元素不存在');
         return;

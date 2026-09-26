@@ -490,6 +490,38 @@ class FileSystem {
     }
 
     // ==========================================
+    // 用户配置文件读写（.FavGallery/config.json）
+    // ==========================================
+
+    /**
+     * ✅ 读取用户配置文件
+     * @returns {Promise<Object|null>} 配置对象；文件不存在或解析失败返回 null
+     */
+    async readUserConfig() {
+        const content = await this.readTextFile(CONFIG.FILE_SYSTEM.CONFIG_FILE);
+        if (!content || content.trim() === '') {
+            return null;
+        }
+        try {
+            return JSON.parse(content);
+        } catch (error) {
+            logger.warn('⚠️ 配置文件解析失败，将回退到默认配置:', error.message);
+            return null;
+        }
+    }
+
+    /**
+     * ✅ 写入用户配置文件
+     * @param {Object} config - 配置对象
+     * @returns {Promise<void>}
+     */
+    async writeUserConfig(config) {
+        const content = JSON.stringify(config, null, 2);
+        await this.writeTextFile(CONFIG.FILE_SYSTEM.CONFIG_FILE, content);
+        logger.info('💾 用户配置文件已写入:', CONFIG.FILE_SYSTEM.CONFIG_FILE);
+    }
+
+    // ==========================================
     // 写入锁管理
     // ==========================================
 

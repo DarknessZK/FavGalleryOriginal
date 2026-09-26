@@ -200,9 +200,11 @@ class App {
     
     /**
      * ✅ 处理收藏作品列表加载进度
+     * @param {string} [collectName] - 收藏夹名（main.js 直发时携带）
+     * @param {string} [collectId] - 收藏夹ID（data-fetcher 通用进度仅带ID，由消费端反查名称）
      */
-    handleCollectWorksProgress(collectName, currentCount, totalCount) {
-        this.listDisplayManager.handleCollectWorksProgress(collectName, currentCount, totalCount, this.bookmarkedManager);
+    handleCollectWorksProgress(collectName, currentCount, totalCount, collectId) {
+        this.listDisplayManager.handleCollectWorksProgress(collectName, currentCount, totalCount, collectId, this.bookmarkedManager);
     }
     
     /**
@@ -279,22 +281,30 @@ class App {
             return;
         }
         
-        // 创建选择器实例
-        this.collectsSelector = new MultiTagSelector({
-            containerId: 'collectsMultiSelect',
-            prefix: 'collects',  // ✅ 使用前缀自动推导所有元素ID
-            dataKey: 'collectId',
-            labelKey: 'collectName',
-            countKey: 'workCount',
-            sortByTime: true,
-            onSelectionChange: (selectedCollectIds) => {
-                logger.info(`📋 收藏夹选择变化: ${selectedCollectIds.size} 个`);
-                this.loadBookmarkedWorksByCollects(selectedCollectIds);
-            }
-        });
-        
-        // 初始化数据
-        this.collectsSelector.init(collects);
+        // ✅ 复用已有实例，仅更新数据：重复 new + init 会在 dropdownTrigger/tagsContainer/document
+        // 这些持久 DOM 上叠加 click 监听，展开下拉时被 toggle N 次，偶数次时下拉永远打不开
+        // （表现为点过一次刷新后“收藏夹选项点不动”，再刷新一次奇偶翻转又恢复）
+        if (this.collectsSelector) {
+            // 回调闭包不随刷新改变，无需重建实例与重复绑定事件
+            this.collectsSelector.updateData(collects);
+        } else {
+            // 创建选择器实例
+            this.collectsSelector = new MultiTagSelector({
+                containerId: 'collectsMultiSelect',
+                prefix: 'collects',  // ✅ 使用前缀自动推导所有元素ID
+                dataKey: 'collectId',
+                labelKey: 'collectName',
+                countKey: 'workCount',
+                sortByTime: true,
+                onSelectionChange: (selectedCollectIds) => {
+                    logger.info(`📋 收藏夹选择变化: ${selectedCollectIds.size} 个`);
+                    this.loadBookmarkedWorksByCollects(selectedCollectIds);
+                }
+            });
+
+            // 初始化数据
+            this.collectsSelector.init(collects);
+        }
         
         logger.info(`✅ 已初始化 ${collects.length} 个收藏夹`);
         
@@ -314,7 +324,8 @@ class App {
         const collectIds = Array.from(selectedCollectIds);
         
         if (collectIds.length === 0) {
-            // 清空列表
+            // 清空列表（无需通知 content 作废缓存：作品会话缓存的代数由「刷新收藏列表」按钮驱动，
+            // 取消勾选不影响缓存，再次勾选直接复用本次刷新周期内已加载的内容）
             this.bookmarkedManager.setData([]);
             this.bookmarkedManager.updateUI();
             logger.info('🗑️ 已清空收藏列表');

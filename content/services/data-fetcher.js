@@ -34,6 +34,18 @@ export class DataFetcher {
     }
     
     /**
+     * ✅ 重建列表配置
+     * 用于用户配置文件加载/变更后，让 listConfigs 反映最新的 maxCount 等配置值。
+     * （listConfigs 在构造时以展开方式固化了 LIST_CONFIGS 的快照，需显式重建）
+     */
+    reloadConfigs() {
+        this.listConfigs = ListConfigFactory.createAllConfigs({
+            backupManager
+        });
+        logger.info('🔄 列表配置已根据用户配置重建');
+    }
+    
+    /**
      * ✅ 通用列表加载器（核心方法）- 支持作品列表、作者列表和收藏夹列表
      * @param {string} listType - 列表类型
      * @param {HTMLIFrameElement} iframe - 通信目标
@@ -89,7 +101,10 @@ export class DataFetcher {
         
         // 3. 检查是否需要API请求
         // ✅ 如果 skipIncrementalCheck 为 true，则始终调用 API（用于检测软删除）
-        const shouldSkipAPI = !config.skipIncrementalCheck && 
+        // ✅ forceRefresh（勾选收藏夹链路专用）：收藏夹作品会话缓存的代数由「刷新收藏列表」按钮驱动，
+        //    到达本层的调用都是该代数内首次勾选，不能被文件缓存短路拦截（否则刷新后重新勾选却拿旧数据、无加载过程）
+        const shouldSkipAPI = !config.skipIncrementalCheck &&
+                              !extraParams.forceRefresh &&
                               cachedItems.length >= config.maxCount;
         
         if (shouldSkipAPI) {
@@ -119,10 +134,12 @@ export class DataFetcher {
             logger.info(`📈 进度: ${current}/${total}`);
             
             // ✅ 发送进度消息到Sidebar（仅在iframe存在且配置了progress时）
+            // collectId 一并携带：bookmarked 的进度消费端（侧边栏）可据此反查收藏夹名称
             if (iframe && config.messages.progress) {
                 this._sendMessage(iframe, config.messages.progress, {
                     currentCount: current,
-                    totalCount: total
+                    totalCount: total,
+                    collectId: extraParams.collectId
                 });
             }
         };
@@ -142,7 +159,7 @@ export class DataFetcher {
         // 5. 合并数据（支持软删除，以 API 顺序为准）
         // ✅ smartIncrementalFetch 返回完整的新→旧窗口（含缓存命中项），
         // 合并后自然保持 API 排序（点赞列表按点赞时间，而非作品发布时间），不能按 createTime 排序
-        const mergedData = this._mergeItems(cachedItems, apiItems, config.idField);
+        const mergedData = this._mergeItems(cachedItems, apiItems, config.idField, config);
         
         // ✅ 按 maxCount 截断：批次粒度会超额拉取，超出目标量的旧数据不进列表
         const effectiveMaxCount = extraParams.maxCount || config.maxCount;
@@ -250,9 +267,10 @@ export class DataFetcher {
      * @param {Array} cached - 缓存数据
      * @param {Array} api - API数据
      * @param {string} idField - ID字段名（配置驱动）
+     * @param {Object} config - 列表配置（可选，用于按类型定制合并策略）
      * @returns {Array} 合并后的数据
      */
-    _mergeItems(cached, api, idField) {
+    _mergeItems(cached, api, idField, config = {}) {
         const cachedMap = new Map();
         cached.forEach(item => {
             cachedMap.set(item[idField], item);
@@ -261,15 +279,34 @@ export class DataFetcher {
         const apiIds = new Set(api.map(item => item[idField]));
         const merged = [];
         
+        // ✅ 作者列表：部分字段应以 API 最新值为准，避免被旧缓存整体覆盖而冻结
+        //    （downloadedCount、以及"已下载作者的 workCount"属下载派生字段，仍保留缓存值）
+        const isAuthors = config.saveKey === 'authors';
+        
         // ✅ 以 API 返回顺序（新→旧）构建结果，保证新增数据排在最前
         // API 数据提供基础字段，缓存中的扩展字段（如 downloadedCount）优先保留
         api.forEach(item => {
             const cachedItem = cachedMap.get(item[idField]);
-            merged.push({
+            const mergedItem = {
                 ...item,
                 ...cachedItem,
                 isDeleted: false
-            });
+            };
+            
+            if (isAuthors && cachedItem) {
+                // 个人资料字段以 API 最新值刷新（缓存整体覆盖会使其冻结在旧值）
+                mergedItem.nickname = item.nickname;
+                mergedItem.avatarUrl = item.avatarUrl;
+                mergedItem.followerCount = item.followerCount;
+                mergedItem.followingCount = item.followingCount;
+                // workCount：仅当该作者已下载过（downloadedCount>0，此时为 relations 精确值）才保留缓存，
+                // 否则采用 API 最新 aweme_count（作者新发布作品后总数才能及时更新）
+                if (!(cachedItem.downloadedCount > 0)) {
+                    mergedItem.workCount = item.workCount;
+                }
+            }
+            
+            merged.push(mergedItem);
         });
         
         // ✅ 仅在缓存中的数据（本次 API 窗口未覆盖）追加到末尾，并标记软删除

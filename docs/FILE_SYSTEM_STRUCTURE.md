@@ -9,6 +9,7 @@
 ```
 用户选择的根目录/
 ├── .FavGallery/                         ← 系统文件（隐藏文件夹）
+│   ├── config.json                      ← 用户配置文件（全局，跨平台共享）
 │   ├── metadata/                        ← 元数据和备份数据（按平台分类）
 │   │   ├── douyin/                      ← 抖音平台数据
 │   │   │   ├── manifest.json            ← 备份清单（记录哈希值和时间戳）
@@ -138,10 +139,10 @@
 
 - **特点**：
   - 临时缓存，可随时删除重建
-  - 由 `list-loader.js` 保存
+  - 由 `data-fetcher.js` 保存（经 `data/storage/*-manager.js` 落盘）
   - 用于降级加载（IndexedDB 无数据时从文件系统加载）
 
-#### 1.4 works 表季度分片
+#### 1.5 works 表季度分片
 - **目录结构**：`works/`
 - **文件命名**：`works_{年份}_Q{季度}.json`
 - **示例**：
@@ -155,13 +156,21 @@
 ### 2. `.FavGallery/logs/{platform}/` - 日志文件
 
 - **用途**：应用运行日志
-- **文件命名**：`app.log` 或按日期轮转 `app_2024-01-01.log`
-- **生成位置**：`utils/logger.js` 初始化文件日志
+- **文件命名**：按天分文件 `{年}-{月}-{日}.log`（如 `2026-09-25.log`）
+- **生成位置**：`utils/file-logger.js` 写入文件日志（`utils/logger.js` 封装调用）
 
 ### 3. `.FavGallery/resources/` - 资源文件
 
 - **用途**：JS/CSS 等资源文件（预留，暂未使用）
 - **当前状态**：空目录
+
+### 3.1 `.FavGallery/config.json` - 用户配置文件
+
+- **用途**：存储用户可调整的配置项（当前为各列表加载数量 `listMaxCount`）
+- **生成时机**：用户首次选择文件夹后自动生成，已存在则读取
+- **格式**：JSON（2 空格缩进）
+- **管理模块**：`config/user-config.js`（加载/生成/合并/应用）、`data/storage/file-system.js`（读写）
+- **详细设计**：见 [CONFIG_SYSTEM.md](./CONFIG_SYSTEM.md)
 
 ### 4. `{平台名称}/` - 下载文件
 
@@ -190,7 +199,8 @@ FILE_SYSTEM: {
     APP_DATA_DIR: '.FavGallery',              // 应用数据根目录
     METADATA_DIR: '.FavGallery/metadata',     // 元数据存储目录
     JS_DIR: '.FavGallery/resources/js',       // JS/CSS 资源目录
-    LOG_DIR: '.FavGallery/logs'               // 日志存储目录
+    LOG_DIR: '.FavGallery/logs',              // 日志存储目录
+    CONFIG_FILE: '.FavGallery/config.json'    // 用户配置文件（全局）
 }
 ```
 
@@ -206,15 +216,16 @@ FILE_SYSTEM: {
 - `config/constants.js` - 定义路径常量
 
 ### 2. 文件系统管理
-- `data/file-system.js` - 文件系统管理器，负责目录创建和文件读写
-- `data/backup-manager.js` - 备份管理器，负责定时备份和增量备份
-- `data/restore-manager.js` - 恢复管理器，负责从备份恢复数据
+- `data/storage/file-system.js` - 文件系统管理器，负责目录创建和文件读写
+- `data/backup/backup-manager.js` - 备份管理器，负责定时备份和增量备份
+- `data/backup/restore-manager.js` - 恢复管理器，负责从备份恢复数据
 
 ### 3. 列表缓存
-- `content/services/list-loader.js` - 列表加载器，保存缓存到文件系统
+- `content/services/data-fetcher.js` - 列表加载器，加载/合并并保存缓存（经 `data/storage/*-manager.js` 落盘）
 
 ### 4. 日志系统
-- `utils/logger.js` - 日志管理器，初始化文件日志
+- `utils/logger.js` - 日志管理器（控制台输出与封装）
+- `utils/file-logger.js` - 文件日志写入
 
 ### 5. 下载文件
 - `download/single-downloader.js` - 单个作品下载器，生成下载文件路径
@@ -255,9 +266,9 @@ const path = `${CONFIG.FILE_SYSTEM.METADATA_DIR}/${platform}/authors.js`;
 2. 在 `logs/` 下创建 `kuaishou/` 目录
 3. 在根目录下创建 `快手/` 目录用于下载文件
 
-### 2. 日志轮转
-- 可以按日期分割日志文件：`app_2024-01-01.log`
-- 定期清理旧日志文件
+### 2. 日志轮转（已实现）
+- 已按日期分割日志文件：`{年}-{月}-{日}.log`（`file-logger.js` 的 `getTodayLogFileName`）
+- 已实现旧日志清理（超过上限时删除最旧的 `.log`）
 
 ### 3. 备份压缩
 - 当前备份文件未压缩（`.js` 格式）
@@ -267,12 +278,16 @@ const path = `${CONFIG.FILE_SYSTEM.METADATA_DIR}/${platform}/authors.js`;
 
 ## 八、版本历史
 
-- **v1.0** (2024-01-XX) - 初始版本，定义基本目录结构
+- **v1.0** (2026-04-28) - 初始版本，定义基本目录结构
   - 使用 `.FavGallery` 作为系统文件根目录
   - 按平台分类存储元数据和日志
   - works 表按季度分片
+- **v1.1** (2026-09-25) - 修正过时内容
+  - 代码路径更新为当前模块布局（`data/storage/`、`data/backup/`；`list-loader.js` → `data-fetcher.js`）
+  - 文件日志生成位置修正为 `utils/file-logger.js`
+  - 修正重复的 `#### 1.4` 编号，补全版本历史占位日期
 
 ---
 
-**最后更新**：2024-01-XX  
+**最后更新**：2026-09-25  
 **维护者**：FavGallery 开发团队

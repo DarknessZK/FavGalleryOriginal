@@ -64,17 +64,13 @@ export class UIStateManager {
             sidebarModeToggle.classList.remove('disabled');
         }
         
-        logger.info('✅ 按钮已启用');
-    }
+        // ✅ 启用“打开本地库”按钮（引导用户手动打开入口文件）
+        const openLibraryBtn = document.getElementById('openLibrary');
+        if (openLibraryBtn) {
+            openLibraryBtn.disabled = false;
+        }
 
-    /**
-     * 设置加载状态
-     */
-    setLoadingState(isLoading) {
-        const statusText = isLoading ? '加载中...' : '就绪';
-        logger.info('设置加载状态:', statusText);
-        
-        // TODO: 后续可以添加更多加载状态控制
+        logger.info('✅ 按钮已启用');
     }
 
     /**

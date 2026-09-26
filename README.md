@@ -12,7 +12,7 @@
 尊重平台速率限制，内置防频控保护
 
 📖 **开发文档**：
-- [架构设计文档](./docs/ARCHITECTURE.md)
+- [功能完成度清单](./docs/FEATURE_COMPLETENESS.md) 📊 当前进度与待办事项
 - [项目开发规则](./docs/DEVELOPMENT_RULES.md) ⭐ **所有 PR 必须符合此规范**
 - [快速参考卡片](./docs/QUICK_REFERENCE.md) 💡 编码时快速查阅
 - [代码审查体系](./docs/CODE_REVIEW_SYSTEM.md) 🔍 PR 审查流程说明

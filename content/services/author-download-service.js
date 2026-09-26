@@ -8,6 +8,7 @@ import { platformAPI } from '../../api/platform-adapter.js';
 import * as relationManager from '../../data/database/relation-manager.js';
 import { database } from '../../data/database/database.js';
 import { BatchDownloadManager } from '../../download/batch-download-manager.js';
+import { generateOfflineData } from '../../data/export/offline-data-generator.js';
 
 const logger = createLogger('AuthorDownloadService');
 
@@ -237,6 +238,13 @@ export class AuthorDownloadService {
             // ✅ Sidebar 会在 workCompleted 累积计数后自动调用 finishAuthorDownload 禁用复选框
             
             logger.info(`✅ 作者作品下载完成: 成功 ${result.progress.success}, 失败 ${result.progress.failed}`);
+            
+            // ✅ 作者下载改变了保存状态/本地媒体/作者下载进度，异步刷新FavGallery 离线页数据（仅当有成功下载）
+            if (result.progress && result.progress.success > 0) {
+                generateOfflineData()
+                    .then(r => { if (r && r.success) logger.info('✅ 离线数据已刷新（作者下载完成）'); })
+                    .catch(e => logger.warn('⚠️ 离线数据刷新失败（作者下载完成）:', e?.message));
+            }
             
             // 清理引用
             this.currentBatchManager = null;

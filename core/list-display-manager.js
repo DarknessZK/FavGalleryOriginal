@@ -6,7 +6,6 @@
 
 import { createLogger, logToUI } from '../utils/logger.js';
 import { databaseProxy } from '../data/database/database-proxy.js';
-import { CONFIG } from '../config/constants.js';
 
 const logger = createLogger('ListDisplayManager');
 
@@ -40,10 +39,10 @@ class ListDisplayManager {
         this.app.isLoading = true;
     
         // 发送消息到 Content Script
+        // ✅ 不再传 maxCount：加载数量由用户配置文件驱动（Content Script 侧）
         window.parent.postMessage({
             source: 'sidebar',
-            type: 'LOAD_LIKED_WORKS',
-            maxCount: CONFIG.FETCH_CONFIG.LIST_CONFIGS.liked.maxCount
+            type: 'LOAD_LIKED_WORKS'
         }, '*');
     }
 
@@ -119,7 +118,11 @@ class ListDisplayManager {
         // ✅ UI 日志
         logToUI('info', `✅ 加载完成: 共 ${total} 个作品`);
 
-        // ✅ 使用缓存的已下载作品ID（已在点赞列表加载时刷新）
+        // ✅ 使用缓存的已下载作品ID；缓存未建立时先刷新（直接勾选收藏夹、未加载过点赞/关注列表时为 null，
+        // 此前裸用会抛 Cannot read properties of null (reading 'size') 导致渲染中断、状态卡在“正在加载”）
+        if (!this.cachedDownloadedWorkIds) {
+            await this.refreshDownloadedWorkIdsCache();
+        }
         const downloadedWorkIds = this.cachedDownloadedWorkIds;
         logger.info(`📋 从缓存查询到 ${downloadedWorkIds.size} 个已下载作品`);
 
@@ -217,7 +220,10 @@ class ListDisplayManager {
      */
     async refreshListDownloadStatus(manager) {
         try {
-            // ✅ 使用缓存的已下载作品ID
+            // ✅ 使用缓存的已下载作品ID（同样防缓存未建立时裸用 null）
+            if (!this.cachedDownloadedWorkIds) {
+                await this.refreshDownloadedWorkIdsCache();
+            }
             const downloadedWorkIds = this.cachedDownloadedWorkIds;
 
             // ✅ 更新 allWorks 中每个作品的 isDownloaded 状态
@@ -240,10 +246,11 @@ class ListDisplayManager {
 
     /**
      * ✅ 通用列表进度处理方法
+     * @param {string} [label] - 可选状态栏文案覆盖（如带收藏夹名的「XX」收藏作品），缺省用类型名
      */
-    handleListProgress(currentCount, totalCount, manager) {
+    handleListProgress(currentCount, totalCount, manager, label) {
         manager.initElements();
-        manager.showProgress(currentCount, totalCount);
+        manager.showProgress(currentCount, totalCount, label);
     }
 
     /**
@@ -255,15 +262,25 @@ class ListDisplayManager {
 
     /**
      * ✅ 处理收藏作品列表加载进度
+     * 两个发送源：main.js 直接带 collectName；data-fetcher 通用进度只带 collectId，
+     * 此处从收藏夹选择器已加载的 dataList 反查名称
      */
-    handleCollectWorksProgress(collectName, currentCount, totalCount, bookmarkedManager) {
-        // ✅ UI 日志（显示收藏夹名称）
-        const progressMsg = `📂 正在加载${collectName || '收藏'}作品... (已加载 ${currentCount} 个)`;
+    handleCollectWorksProgress(collectName, currentCount, totalCount, collectId, bookmarkedManager) {
+        if (!collectName && collectId) {
+            const item = (this.app.collectsSelector?.dataList || []).find(c => c.collectId === collectId);
+            collectName = item && item.collectName;
+        }
+
+        // ✅ UI 日志（显示收藏夹名称，无名称时回退通用文案）
+        const progressMsg = collectName
+            ? `📂 正在加载「${collectName}」作品... (已加载 ${currentCount} 个)`
+            : `📂 正在加载收藏作品... (已加载 ${currentCount} 个)`;
         logToUI('info', progressMsg);
         logger.info(progressMsg);
-        
-        // ✅ 显示进度条（与点赞列表保持一致）
-        this.handleListProgress(currentCount, totalCount, bookmarkedManager);
+
+        // ✅ 显示进度条（状态栏同步带收藏夹名）
+        const label = collectName ? `「${collectName}」收藏作品` : undefined;
+        this.handleListProgress(currentCount, totalCount, bookmarkedManager, label);
     }
 
     /**
@@ -343,10 +360,10 @@ class ListDisplayManager {
         this.app.isLoading = true;
     
         // 发送消息到 Content Script
+        // ✅ 不再传 maxCount：加载数量由用户配置文件驱动（Content Script 侧）
         window.parent.postMessage({
             source: 'sidebar',
-            type: 'LOAD_FOLLOWING_AUTHORS',
-            maxCount: CONFIG.FETCH_CONFIG.LIST_CONFIGS.following.maxCount
+            type: 'LOAD_FOLLOWING_AUTHORS'
         }, '*');
     }
     

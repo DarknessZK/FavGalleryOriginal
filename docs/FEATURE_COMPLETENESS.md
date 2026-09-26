@@ -1,6 +1,7 @@
 # FavGallery 业务功能完成度评估
 
 > **评估时间**: 2026-05-06  
+> **最近更新**: 2026-09-26（收藏夹作品加载链路专项修复：进度提示带收藏夹名与字段名兼容、下载状态缓存空值兜底、多收藏夹勾选串行化、刷新代数驱动的双层缓存与 forceRefresh、收藏夹下拉重复绑定修复；此前 2026-09-25 修复离线页收藏夹名为空→“未命名收藏夹”/作品数为0、侧边栏作者卡片“已存X/Y作品”不实时刷新、getAuthorDownloadStatus 关系查询方向反三处 bug；更早期 2026-09-23：离线收藏浏览页数据生成器/静态壳生成器已实现、入口定名 `FavGallery.html`、新增首屏看门狗友好引导）  
 > **评估版本**: v1.0.0  
 > **评估范围**: 所有核心业务功能
 
@@ -11,15 +12,15 @@
 | 功能模块 | 完成度 | 状态 | 说明 |
 |---------|-------|------|------|
 | **平台支持** | 80% | 🟡 部分完成 | 抖音已完成，小红书预留接口 |
-| **数据获取** | 90% | 🟢 基本完成 | 点赞/收藏/关注列表已实现 |
+| **数据获取** | 100% | 🟢 完成 | 点赞/收藏/关注/收藏夹列表全部配置化 |
 | **数据持久化** | 95% | 🟢 基本完成 | IndexedDB + 文件系统备份 |
-| **下载功能** | 85% | 🟢 基本完成 | 单作品/批量下载已实现 |
+| **下载功能** | 95% | 🟢 基本完成 | 单作品/批量/音乐下载已实现 |
 | **UI交互** | 75% | 🟡 部分完成 | 基础功能完成，高级功能待开发 |
 | **备份恢复** | 90% | 🟢 基本完成 | 增量备份、季度分片已实现 |
 | **搜索筛选** | 70% | 🟡 部分完成 | 基础搜索完成，高级筛选待开发 |
 | **多平台扩展** | 30% | 🔴 初期阶段 | 架构已设计，需实现其他平台 |
 
-**整体完成度**: **~77%** （核心功能已基本完成，高级功能和优化待完善）
+**整体完成度**: **~80%** （核心功能已基本完成，高级功能和优化待完善）
 
 ---
 
@@ -79,14 +80,16 @@
 |------|-------|------|---------|------|
 | 点赞列表加载 | ✅ 100% | 完成 | `content/services/data-fetcher.js:L23-59` | listConfigs.liked |
 | 收藏列表加载 | ✅ 100% | 完成 | `content/services/data-fetcher.js:L61-99` | listConfigs.bookmarked |
-| 关注列表加载 | ⚠️ 50% | 部分完成 | TODO: 需添加到 listConfigs | 逻辑类似，待配置化 |
+| 关注列表加载 | ✅ 100% | 完成 | `content/services/list-config-factory.js:L62-76` | listConfigs.following |
 | 收藏夹多选加载 | ✅ 100% | 完成 | `core/app.js:L273-300` | loadBookmarkedWorksByCollects |
 | 增量获取机制 | ✅ 100% | 完成 | `content/services/data-fetcher.js:L133-197` | _loadListInternal |
+| 收藏夹作品刷新代数缓存 | ✅ 100% | 完成 | `content/main.js` `_collectWorksCache` | 会话级缓存（collectId→works）由「刷新收藏列表」按钮/重选文件夹驱动作废；代数内再次勾选静默复用不重走 API，首次勾选传 forceRefresh 绕过文件缓存短路（v2026-09-26） |
+| 勾选加载串行化 | ✅ 100% | 完成 | `content/main.js` `_handleLoadCollectWorks` | 加载中收到新勾选只记最新集合排队重跑，防两循环并发读写同一缓存/消息交错（v2026-09-26） |
 | 缓存合并策略 | ✅ 100% | 完成 | `content/services/data-fetcher.js:L256-280` | _mergeWorks |
-| 进度回调通知 | ✅ 100% | 完成 | `content/services/data-fetcher.js:L160-169` | onProgress |
+| 进度回调通知 | ✅ 100% | 完成 | `content/services/data-fetcher.js:L160-169` | onProgress；收藏列表进度带收藏夹名（main.js 直发 collectName，data-fetcher 带 collectId 由侧边栏反查），兼容 current/total 与 currentCount/totalCount 两套字段名（v2026-09-26） |
 | 元数据管理 | ✅ 100% | 完成 | `data/storage/works-manager.js` | metadata保存和加载 |
 
-**小计**: 7.5/8 功能完成，**完成度 94%**
+**小计**: 10/10 功能完成，**完成度 100%**
 
 ---
 
@@ -146,11 +149,11 @@
 |------|-------|------|---------|------|
 | 批量添加关系 | ✅ 100% | 完成 | `data/database/relation-manager.js` | batchAddRelations |
 | 查询入边关系 | ✅ 100% | 完成 | `data/database/relation-manager.js` | getIncomingRelations |
-| 查询出边关系 | ⚠️ 50% | 部分完成 | TODO标记 | 需要实现getOutgoingRelations |
+| 查询出边关系 | ✅ 100% | 完成 | `data/database/relation-manager.js:L151-163` | getOutgoingRelations |
 | 关系类型支持 | ✅ 100% | 完成 | work-author, author-group等 | 多种关系类型 |
 | 只插入不删除 | ✅ 100% | 完成 | 设计理念 | isDeleted标记失效 |
 
-**小计**: 4/5 功能完成，**完成度 80%**
+**小计**: 5/5 功能完成，**完成度 100%**
 
 ---
 
@@ -163,7 +166,7 @@
 | 视频下载 | ✅ 100% | 完成 | `download/single-downloader.js` | downloadVideo |
 | 图集下载 | ✅ 100% | 完成 | `download/single-downloader.js` | downloadImagePost |
 | 封面下载 | ✅ 100% | 完成 | `download/single-downloader.js` | downloadCover |
-| 音乐下载 | ⚠️ 50% | 部分完成 | 预留接口 | 需完善实现 |
+| 音乐下载 | ✅ 100% | 完成 | `download/page-downloader.js:L150-167` | musicUrl获取+保存，single-downloader.js持久化 |
 | 断点续传 | ✅ 100% | 完成 | `download/single-downloader.js` | enableResume配置 |
 | 文件大小检测 | ✅ 100% | 完成 | `download/single-downloader.js` | Blob vs ArrayBuffer |
 | 超时控制 | ✅ 100% | 完成 | `download/single-downloader.js` | timeout配置 |
@@ -171,7 +174,7 @@
 | 文件命名规范 | ✅ 100% | 完成 | `config/constants.js:L380-385` | fileNameFormats |
 | 目录结构创建 | ✅ 100% | 完成 | `download/single-downloader.js` | 自动创建作者目录 |
 
-**小计**: 9.5/10 功能完成，**完成度 95%**
+**小计**: 10/10 功能完成，**完成度 100%**
 
 ---
 
@@ -248,7 +251,7 @@
 
 | 功能 | 完成度 | 状态 | 文件位置 | 说明 |
 |------|-------|------|---------|------|
-| 标签选择器组件 | ✅ 100% | 完成 | `ui/components/multi-tag-selector.js` | MultiTagSelector类 |
+| 标签选择器组件 | ✅ 100% | 完成 | `ui/components/multi-tag-selector.js` | MultiTagSelector类；刷新时单实例复用（updateData）+ _bindEvents 防重复绑定，修复下拉奇偶性打不开（v2026-09-26） |
 | 多选交互 | ✅ 100% | 完成 | `ui/components/multi-tag-selector.js` | 点击选中/取消 |
 | 全选/清空功能 | ✅ 100% | 完成 | `ui/components/multi-tag-selector.js` | selectAll/clearAll |
 | 按时间排序 | ✅ 100% | 完成 | `ui/components/multi-tag-selector.js` | sortByTime配置 |
@@ -269,9 +272,9 @@
 | 进度条显示 | ✅ 100% | 完成 | `core/download-handler.js` | updateBatchDownloadProgress |
 | 成功/失败统计 | ✅ 100% | 完成 | `core/download-handler.js` | progress对象 |
 | 按钮状态管理 | ✅ 100% | 完成 | `ui/ui-state-manager.js` | 禁用/启用控制 |
-| 加载中遮罩 | ⚠️ 50% | 部分完成 | TODO标记 | 需要完善加载状态 |
+| 加载状态控制 | ✅ 100% | 完成 | `core/list-display-manager.js:L33-40` | disableAllControlButtons 防重复点击，成功/失败均恢复 |
 
-**小计**: 5.5/6 功能完成，**完成度 92%**
+**小计**: 6/6 功能完成，**完成度 100%**
 
 ---
 
@@ -383,8 +386,9 @@
 | 数据库配置 | ✅ 100% | 完成 | `config/constants.js:L241-293` | stores和indexes |
 | 下载配置 | ✅ 100% | 完成 | `config/constants.js:L299-393` | 批量/单个下载 |
 | 配置化工具函数 | ✅ 100% | 完成 | `config/constants.js:L402-425` | getPlatformEndpoints等 |
+| 用户配置文件 | ✅ 100% | 完成 | `config/user-config.js`、`data/storage/file-system.js` | `.FavGallery/config.json` 加载/生成/合并/应用，驱动各列表 maxCount（详见 CONFIG_SYSTEM.md） |
 
-**小计**: 9/9 功能完成，**完成度 100%**
+**小计**: 10/10 功能完成，**完成度 100%**
 
 ---
 
@@ -437,14 +441,27 @@
 12. ✅ **基础搜索** - 作品/作者搜索
 13. ✅ **日志系统** - 控制台+文件双输出
 14. ✅ **配置管理** - 完全配置驱动
+15. ✅ **关注列表配置化** - listConfigs.following 统一加载
+16. ✅ **关系表出边查询** - getOutgoingRelations 已实现
+17. ✅ **音乐下载** - musicUrl 获取与保存完整链路
+18. ✅ **侧边栏「打开本地库」一键打开（B+ 自动捕获）** - background 静默反查已打开的 file:// 标签页 URL 记住离线页绝对路径，一键聚焦/打开；详见 OPEN_LOCAL_LIBRARY.md
+19. ✅ **收藏夹作品加载链路加固（v2026-09-26）** - 进度带名/字段兼容/空缓存兜底/勾选串行化/刷新代数双层缓存/下拉重复绑定六项修复，实机验证通过
 
 ### 部分完成的功能（⚠️ 50%-90%）
 
-1. ⚠️ **关注列表加载** - 50%，需配置化到listConfigs
-2. ⚠️ **关系表查询** - 80%，getOutgoingRelations待实现
-3. ⚠️ **音乐下载** - 50%，预留接口待完善
-4. ⚠️ **加载状态UI** - 50%，TODO标记待完善
-5. ⚠️ **小红书平台** - 20%，仅架构准备
+1. ⚠️ **小红书平台** - 20%，仅架构准备
+
+### 可选打磨（不排期）
+
+1. 💅 **加载状态视觉优化** - 刷新按钮文字变"加载中..."、利用已有进度消息显示"40/120"（防重复点击已实现，纯体验增强）
+
+### 预留/规划中功能（已归档，待排期）
+
+1. 🔜 **界面配置面板** - Sidebar 可视化读写 config.json，经 GET_USER_CONFIG/SAVE_USER_CONFIG 通道即时生效（详见 CONFIG_SYSTEM.md 第五节）
+2. 🔜 **backup 配置项纳入配置文件** - 备份策略从 constants.js 静态常量迁移到 config.json（version:2 结构），随配置面板一起调整
+3. 🔜 **机制二：用户主动本地删除作品** - 界面手动删除已下载作品时 removeRelation 物理删边 + 同步清 completed_works（罕见场景，低优先；详见 DATABASE_SCHEMA.md relations 表设计说明）
+4. 🔜 **收藏/关注列表批量操作** - event-binder.js 中预留的批量操作绑定尚未实现
+5. 🟡 **离线收藏浏览页（FavGallery.html）** - 选文件夹时自动生成、可脱离扩展双击打开的静态浏览页（平台多级分页 + 点赞/作者/收藏夹 + 本地封面/点开本地视频 + 搜索/筛选/排序）。面向 40 万作品量级，采用三维分片（作者/点赞按月/收藏夹）+ 懒加载 + 自包含分片架构。数据生成器与静态壳生成器已实现（选文件夹自动生成 `FavGallery.html` + `resources/offline-viewer/*`），并新增首屏看门狗友好引导（首次使用尚未生成数据时不再无限转圈）；2026-09-25 修复收藏夹名被 put 覆盖导致“未命名收藏夹”/作品数为0、作者卡片“已存X/Y”不刷新等显示 bug；2026-09-26 补齐作品视图列表内分页（页码条/每页数量/时间筛选/跳至页输入框）、顶部固定仅列表滚动布局、静态壳资源 ?v= 缓存击穿；同日 v2.6 落地全局搜索索引（search-index.js 懒加载跨分片检索）与观察 C（封面远程回退）/D（图集落盘校验）修复，实机验证已通过；v2.6.1 全局搜索结果独立视图化（蓝退出钮/Tab去高亮/来源标注，入口放开到三 Tab）；v2.7 搜索框多关键词小卡片（chip，回车/逗号固化、可单删，中/英文逗号均可叠加）；v2.7.1 多词匹配开关（已被 v2.7.2 替代）；v2.7.2 多词匹配定稿：分片内固定 OR、全局搜索固定 AND，仅文字提示不设开关；详见 OFFLINE_COLLECTION_VIEWER.md
 
 ### 未完成的功能（❌ 0%）
 
@@ -463,15 +480,12 @@
 
 ### P0 - 立即修复（影响核心功能）
 
-1. **关注列表配置化** - 添加到listConfigs，统一加载逻辑
-2. **getOutgoingRelations实现** - 完善关系表查询功能
-3. **加载状态UI完善** - 消除TODO标记，提升用户体验
+（暂无）
 
 ### P1 - 短期优化（1-2周）
 
-1. **音乐下载完善** - 补充完整的音乐下载逻辑
-2. **高级筛选基础版** - 实现时间范围和下载状态筛选
-3. **错误边界处理** - 添加全局错误捕获和友好提示
+1. **高级筛选基础版** - 实现时间范围和下载状态筛选
+2. **错误边界处理** - 添加全局错误捕获和友好提示
 
 ### P2 - 中期规划（1-2月）
 
@@ -492,11 +506,10 @@
 
 ### 已知问题
 
-1. **relation-manager.js** - 2处TODO标记，需补充查询方法
-2. **ui-state-manager.js** - 1处TODO标记，需完善加载状态
-3. **collects-multi-select.js** - 0KB空文件，可能已废弃
-4. **缺少单元测试** - 核心逻辑无自动化测试
-5. **TypeScript迁移** - 可考虑迁移增强类型安全
+1. **relation-manager.js** - 1处TODO标记（hasRelation，实为"机制二"用户主动本地删除的预留件，非单纯性能问题；详见 DATABASE_SCHEMA.md relations 表设计说明）
+2. **ui-state-manager.js** - 已无TODO标记（setLoadingState死代码已删除）
+3. **缺少单元测试** - 核心逻辑无自动化测试
+4. **TypeScript迁移** - 可考虑迁移增强类型安全
 
 ### 改进建议
 
@@ -510,11 +523,11 @@
 
 ## 📊 最终评估
 
-### 核心功能完成度：**85%**
+### 核心功能完成度：**90%**
 - 抖音平台：100% ✅
-- 数据获取：94% ✅
+- 数据获取：100% ✅
 - 数据持久化：100% ✅
-- 下载功能：95% ✅
+- 下载功能：100% ✅
 - UI交互：95% ✅
 - 备份恢复：100% ✅
 
@@ -535,7 +548,7 @@
 **总体评价**：FavGallery 项目的**核心功能已经非常完善**，抖音平台的支持达到了生产级别的质量。主要的不足在于**测试覆盖率较低**和**高级功能尚未开发**。建议优先补充测试和完善已知TODO项，然后逐步扩展多平台支持和高级功能。
 
 **推荐下一步行动**：
-1. 立即修复3个P0级别的TODO项
+1. 实机验证离线浏览页与「打开本地库」B+（代码已落地，仅剩验证：重载扩展→重选文件夹→双击离线页→开文件授权后验证一键打开）
 2. 搭建测试框架，为核心逻辑编写单元测试
 3. 实现小红书平台，验证跨平台架构
 4. 根据用户反馈优先级开发高级功能
