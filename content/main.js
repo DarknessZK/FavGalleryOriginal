@@ -13,6 +13,9 @@ import { database } from '../data/database/database.js';
 import * as relationManager from '../data/database/relation-manager.js';
 import { platformAPI } from '../api/platform-adapter.js';
 import { CONFIG } from '../config/constants.js';
+import { userConfig } from '../config/user-config.js';
+import { generateOfflineData } from '../data/export/offline-data-generator.js';
+import { generateStaticShell } from '../data/export/offline-shell-generator.js';
 import fileLogger from '../utils/file-logger.js';
 
 const logger = createLogger('ContentScript');
@@ -37,6 +40,13 @@ class ContentScript {
         const scriptSrc = currentScript?.src || '';
         const urlParams = new URLSearchParams(scriptSrc.split('?')[1] || '');
         this.sidebarUrl = urlParams.get('sidebar');
+        
+        // ✅ 扩展源（chrome-extension://<id>）：main world 无 chrome.runtime，
+        //    由 index.js 通过 script src 的 ext_id 参数传入，供静态壳生成器 fetch 扩展资源
+        const extId = urlParams.get('ext_id');
+        this.extensionOrigin = extId
+            ? `chrome-extension://${extId}`
+            : (this.sidebarUrl ? new URL(this.sidebarUrl).origin : '');
         
         logger.info('ContentScript 初始化', { sidebarUrl: this.sidebarUrl });
         
@@ -218,11 +228,13 @@ class ContentScript {
                 break;
                 
             case 'SELECT_FOLDER':
+                // 重选文件夹 = 数据源变化，收藏夹作品会话缓存作废
+                this._collectWorksCache = null;
                 this.selectFolder(iframe);
                 break;
                 
             case 'LOAD_LIKED_WORKS':  // ✅ 改为 LOAD_LIKED_WORKS
-                await this._handleLoadLikedWorks(iframe, event.data.maxCount);
+                await this._handleLoadLikedWorks(iframe);
                 break;
                 
             case 'LOAD_LIKED_FROM_CACHE':
@@ -263,9 +275,7 @@ class ContentScript {
             case 'LOAD_FOLLOWING_AUTHORS':
                 logger.info('👥 收到加载关注列表请求');
                 dataFetcher.setFolderSelected(true);
-                await dataFetcher._loadList('following', iframe, { 
-                    maxCount: event.data.maxCount || CONFIG.FETCH_CONFIG.LIST_CONFIGS.following.maxCount 
-                });
+                await dataFetcher._loadList('following', iframe, {});
                 break;
             
             // ✅ 处理加载收藏夹作品请求
@@ -307,10 +317,11 @@ class ContentScript {
 
     /**
      * ✅ 处理加载点赞列表
+     * maxCount 不再由 Sidebar 传入，而是由用户配置文件驱动（dataFetcher.listConfigs）
      */
-    async _handleLoadLikedWorks(iframe, maxCount) {
+    async _handleLoadLikedWorks(iframe) {
         dataFetcher.setFolderSelected(true);
-        await dataFetcher._loadList('liked', iframe, { maxCount });
+        await dataFetcher._loadList('liked', iframe, {});
     }
 
     /**
@@ -330,6 +341,10 @@ class ContentScript {
      * ✅ 处理加载收藏夹列表（使用配置化方式）
      */
     async _handleLoadCollectsList(iframe) {
+        // ✅ 刷新收藏列表 = 显式更新入口：作废收藏夹作品会话缓存（新代数），
+        // 本次刷新后首次勾选的收藏夹会完整重走加载；同代数内取消再勾选仍直接复用
+        this._collectWorksCache = null;
+        logger.info('🔄 刷新收藏列表，收藏夹作品会话缓存已作废');
         // ✅ 统一处理：收藏夹也需要文件夹（folderRequired: true）
         dataFetcher.setFolderSelected(true);
         await dataFetcher._loadList('collects', iframe, { 
@@ -338,12 +353,44 @@ class ContentScript {
     }
 
     /**
-     * ✅ 处理加载收藏夹作品
+     * ✅ 处理加载收藏夹作品（串行入口）
+     * 加载中收到新的勾选请求时不并发执行，只记录最新一次请求，
+     * 待当前循环完成后按最新收藏夹集合重跑。
+     * 并发会导致：同一收藏夹缓存被两个循环同时读写、
+     * 两组 COLLECT_WORKS_PROGRESS/LOADED 消息交错覆盖状态栏与列表
      */
     async _handleLoadCollectWorks(data, iframe) {
+        if (this._collectWorksLoading) {
+            this._collectWorksPending = data;
+            logger.info('⏳ 收藏夹作品正在加载中，记录最新勾选请求，完成后将按最新集合重跑');
+            return;
+        }
+        this._collectWorksLoading = true;
+        try {
+            await this._doLoadCollectWorks(data, iframe);
+            // 加载期间选择有变化 → 用最后一次的最新集合重跑（多轮快速勾选只保留最后一条）
+            while (this._collectWorksPending) {
+                const next = this._collectWorksPending;
+                this._collectWorksPending = null;
+                logger.info('🔁 按加载期间更新后的收藏夹选择重新处理');
+                await this._doLoadCollectWorks(next, iframe);
+            }
+        } finally {
+            this._collectWorksLoading = false;
+        }
+    }
+
+    /**
+     * ✅ 收藏夹作品加载实际执行体
+     */
+    async _doLoadCollectWorks(data, iframe) {
         try {
             const { collectIds } = data;
             const allWorksMap = new Map();
+            // ✅ 会话级收藏夹作品缓存（collectId → works），代数由「刷新收藏列表」按钮驱动：
+            // - 已加载过的收藏夹再次勾选 → 静默复用（不走 API、不重放进度，取消勾选不影响）
+            // - 点击刷新按钮（_handleLoadCollectsList）或重选文件夹时整个作废，之后首次勾选重新加载
+            if (!this._collectWorksCache) this._collectWorksCache = new Map();
             
             // ✅ 先获取所有收藏夹的元数据（包含名称）
             const collectsMetadata = {};
@@ -364,6 +411,14 @@ class ContentScript {
             for (let i = 0; i < collectIds.length; i++) {
                 const collectId = collectIds[i];
                 const collectName = collectsMetadata[collectId] || `收藏夹${collectId.substring(0, 8)}`;
+
+                // ✅ 会话内已加载过（本次刷新代数内）：跳过重复加载，也不发进度消息
+                const cachedWorks = this._collectWorksCache.get(collectId);
+                if (cachedWorks) {
+                    cachedWorks.forEach(work => allWorksMap.set(work.workId, work));
+                    logger.info(`⚡ 本次刷新周期内已加载过，直接复用: ${collectName} (${cachedWorks.length} 个作品)`);
+                    continue;
+                }
                 
                 // ✅ 发送开始加载消息（带收藏夹名称）
                 iframe.contentWindow.postMessage({
@@ -380,15 +435,20 @@ class ContentScript {
                 logger.info(`📂 正在加载收藏夹 ${i + 1}/${collectIds.length}: ${collectName} (${collectId})`);
                 
                 try {
+                    // forceRefresh：会话缓存未命中 = 本次刷新代数内首次勾选，
+                    // 强制走 API 增量拉取，绕过 data-fetcher 的文件缓存短路（缓存满额就直接返旧数据）
                     const works = await dataFetcher._loadList('bookmarked', iframe, { 
                         collectId,
-                        maxCount: CONFIG.FETCH_CONFIG.LIST_CONFIGS.bookmarked.maxCount
+                        maxCount: CONFIG.FETCH_CONFIG.LIST_CONFIGS.bookmarked.maxCount,
+                        forceRefresh: true
                     });
                     
                     if (works && works.length > 0) {
                         works.forEach(work => {
                             allWorksMap.set(work.workId, work);
                         });
+                        // ✅ 写入会话缓存：同一刷新代数内持续有效，刷新收藏列表/重选文件夹时作废
+                        this._collectWorksCache.set(collectId, works);
                         
                         // ✅ 发送进度更新消息
                         iframe.contentWindow.postMessage({
@@ -566,6 +626,11 @@ class ContentScript {
             this.currentBatchManager = null;
             this.currentBatchId = null;
             
+            // ✅ 下载改变了保存状态与本地媒体，整批完成后异步刷新FavGallery 离线页数据（仅当有成功下载）
+            if (result.progress && result.progress.success > 0) {
+                this._refreshOfflineData('批量下载完成');
+            }
+            
         } catch (error) {
             logger.error('❌ 批量下载异常:', error);
             
@@ -689,11 +754,20 @@ class ContentScript {
                 await fileSystem.init();
                 logger.info('✅ 文件系统已初始化');
                 
+                // ✅ 加载/生成用户配置文件，并重建列表配置（使 maxCount 等由配置驱动）
+                await userConfig.ensureConfig(fileSystem);
+                dataFetcher.reloadConfigs();
+                logger.info('✅ 用户配置已加载并应用');
+                
                 // ✅ 自动检查并恢复备份
                 await this.autoRestoreFromBackup();
                 
                 // 通知 dataFetcher 文件夹已选择
                 dataFetcher.setFolderSelected(true);
+                
+                // ✅ 异步生成FavGallery 离线页静态壳 + 数据（不阻塞 UI；失败仅记录日志）
+                this._generateOfflineShell();
+                this._refreshOfflineData('选择文件夹');
                 
                 // 通知侧边栏
                 iframe.contentWindow.postMessage({
@@ -736,6 +810,43 @@ class ContentScript {
             this.isSelectingFolder = false;
             logger.info('🔓 文件选择器已释放');
         }
+    }
+    
+    /**
+     * ✅ 异步生成FavGallery 离线页静态壳（FavGallery.html + resources/offline-viewer/*）
+     * fire-and-forget：不 await；每次选文件夹覆盖，保证壳与扩展版本一致
+     */
+    _generateOfflineShell() {
+        generateStaticShell(this.extensionOrigin)
+            .then(result => {
+                if (result?.success) {
+                    logger.info(`✅ 离线静态壳已生成（${result.count} 个文件）`);
+                } else {
+                    logger.info(`ℹ️ 离线静态壳未生成: ${result?.reason || result?.error || '未知'}`);
+                }
+            })
+            .catch(error => {
+                logger.warn('⚠️ 离线静态壳生成异常:', error?.message);
+            });
+    }
+    
+    /**
+     * ✅ 异步刷新FavGallery 离线页数据
+     * fire-and-forget：不 await，避免阻塞主流程；生成器内部有并发保护，重复触发会被跳过
+     * @param {string} reason - 触发原因（仅用于日志）
+     */
+    _refreshOfflineData(reason = '') {
+        generateOfflineData()
+            .then(result => {
+                if (result?.success) {
+                    logger.info(`✅ 离线数据生成完成（${reason}）:`, result.counts);
+                } else {
+                    logger.info(`ℹ️ 离线数据生成未执行（${reason}）: ${result?.reason || result?.error || '未知'}`);
+                }
+            })
+            .catch(error => {
+                logger.warn(`⚠️ 离线数据生成异常（${reason}）:`, error?.message);
+            });
     }
     
     /**

@@ -94,6 +94,21 @@ export const CONFIG = {
         /** ✅ 日志存储目录（按平台分类） */
         LOG_DIR: '.FavGallery/logs',
         
+        /** ✅ 用户配置文件路径（全局，跨平台共享） */
+        CONFIG_FILE: '.FavGallery/config.json',
+        
+        /** ✅ 离线浏览页数据子目录（位于 metadata/{platform}/ 下） */
+        OFFLINE_DIR: 'offline',
+        
+        /** ✅ 离线浏览页跨平台清单文件（位于 metadata/ 下，供页面判断渲染哪些平台） */
+        OFFLINE_INDEX_FILE: '.FavGallery/metadata/offline-index.js',
+        
+        /** ✅ 离线浏览页静态壳资源目录（HTML 引用的 css/js） */
+        OFFLINE_VIEWER_DIR: '.FavGallery/resources/offline-viewer',
+        
+        /** ✅ 离线浏览页入口 HTML 文件名（生成到用户根目录，唯一露给用户的入口文件） */
+        OFFLINE_ENTRY_HTML: 'FavGallery.html',
+        
         /** 元数据文件名称映射 */
         METADATA_FILES: {
             AUTHORS: 'authors',
@@ -164,6 +179,21 @@ export const CONFIG = {
                 justifyContent: 'center'
             }
         }
+    },
+    
+    // ==========================================
+    // 用户配置文件（.FavGallery/config.json）
+    // ==========================================
+    
+    /**
+     * ✅ 用户配置文件元信息
+     * 说明：配置文件在选择文件夹时生成/读取，默认值在运行时
+     *      由 FETCH_CONFIG.LIST_CONFIGS 派生（单一数据源，避免重复硬编码）。
+     *      未来 UI 配置面板将读写此文件（含 backup 配置项）。
+     */
+    USER_CONFIG: {
+        /** 配置文件结构版本号，结构变更时递增，用于迁移兼容 */
+        version: 1
     },
     
     // ==========================================

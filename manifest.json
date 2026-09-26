@@ -20,7 +20,8 @@
 
   "permissions": [
     "storage",
-    "unlimitedStorage"
+    "unlimitedStorage",
+    "tabs"
   ],
 
   "host_permissions": [
@@ -73,6 +74,9 @@
         "data/backup/index.js",
         "data/backup/backup-manager.js",
         "data/backup/restore-manager.js",
+        "data/export/offline-data-generator.js",
+        "data/export/offline-record-builder.js",
+        "data/export/offline-shell-generator.js",
         "download/single-downloader.js",
         "download/batch-download-manager.js",
         "download/download-lock.js",
@@ -89,6 +93,8 @@
         "content/services/list-config-factory.js",
         "content/services/author-download-service.js",
         "core/app.js",
+        "config/constants.js",
+        "config/user-config.js",
         "core/message-handler.js",
         "core/event-binder.js",
         "core/list-display-manager.js",
@@ -97,7 +103,12 @@
         "core/author-download-manager.js",
         "ui/components/tab-manager.js",
         "ui/components/multi-tag-selector.js",
-        "ui/ui-state-manager.js"
+        "ui/ui-state-manager.js",
+        "ui/html/my-collection.html",
+        "ui/css/my-collection.css",
+        "ui/local/index.js",
+        "ui/local/core.js",
+        "ui/local/features.js"
       ],
       "matches": ["https://www.douyin.com/*", "https://www.xiaohongshu.com/*"]
     }

@@ -271,14 +271,15 @@ export class WorkListManager {
 
     /**
      * 显示加载进度（仅显示已加载数量，不显示 xx/yy 格式）
+     * @param {string} [label] - 可选文案覆盖（如带收藏夹名的「XX」收藏作品）
      */
-    showProgress(currentCount, totalCount) {
+    showProgress(currentCount, totalCount, label) {
         if (!this.elements.status) return;
 
         // ✅ 符合设计原则：只显示已加载数量，不显示 xx/yy 格式
         this.elements.status.innerHTML = `
             <div style="color: #1890ff;">
-                ⏳ 正在加载${this.getTypeName()}... (已加载 ${currentCount} 个)
+                ⏳ 正在加载${label || this.getTypeName()}... (已加载 ${currentCount} 个)
             </div>
         `;
     }

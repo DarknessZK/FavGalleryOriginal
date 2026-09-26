@@ -13,6 +13,8 @@ body {
     background: #f5f5f5;
     padding: 0;
     margin: 0;
+    height: 100%;
+    overflow: hidden;
 }
 
 .container {
@@ -20,7 +22,10 @@ body {
     max-width: 100%;
     margin: 0;
     background: white;
-    min-height: 100vh;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 /* 头部 */
@@ -28,6 +33,7 @@ body {
     padding: 20px 30px;
     border-bottom: 1px solid #e8e8e8;
     background: white;
+    flex-shrink: 0;
 }
 
 .header h1 {
@@ -46,21 +52,83 @@ body {
     padding: 15px 30px;
     background: white;
     border-bottom: 1px solid #e8e8e8;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* 搜索框（多关键词 chip 式：小卡片与输入同在带边框容器内） */
+.search-box {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid #d9d9d9;
+    border-radius: 6px;
+    background: #fff;
+    transition: all 0.3s;
+    cursor: text;
+}
+
+.search-box:focus-within {
+    border-color: #1890ff;
+    box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1);
+}
+
+/* chips 容器不参与布局，子元素与输入框在同一 flex 流中平行排列 */
+.search-chips {
+    display: contents;
+}
+
+.search-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    background: #e6f7ff;
+    border: 1px solid #91d5ff;
+    border-radius: 12px;
+    font-size: 12px;
+    color: #1890ff;
+    max-width: 240px;
+}
+
+.search-chip .chip-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.search-chip .chip-close {
+    cursor: pointer;
+    font-style: normal;
+    font-weight: bold;
+    color: #69c0ff;
+    padding: 0 2px;
+    line-height: 1;
+}
+
+.search-chip .chip-close:hover {
+    color: #ff4d4f;
 }
 
 .search-input {
-    width: 100%;
-    padding: 10px 15px;
-    border: 1px solid #d9d9d9;
-    border-radius: 6px;
+    flex: 1;
+    min-width: 180px;
+    padding: 4px 5px;
+    border: none;
+    border-radius: 0;
     font-size: 14px;
     transition: all 0.3s;
     outline: none;
 }
 
 .search-input:focus {
-    border-color: #1890ff;
-    box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1);
+    border: none;
+    box-shadow: none;
 }
 
 .search-input::placeholder {
@@ -135,15 +203,32 @@ body {
     color: #1890ff;
 }
 
+/* 全局搜索退出按钮（筛选「未保存」右侧，仅全局模式显示，蓝底白字醒目） */
+.global-exit-btn {
+    display: none;
+    align-items: center;
+    margin-left: 10px;
+    padding: 4px 12px;
+    border: none;
+    border-radius: 4px;
+    background: #1890ff;
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.2s;
+    white-space: nowrap;
+}
+
+.global-exit-btn:hover {
+    background: #40a9ff;
+}
+
 /* Tab 导航 */
 .tab-nav {
     display: flex;
     gap: 0;
     border-bottom: 2px solid #e8e8e8;
     background: #fafafa;
-    position: sticky;
-    top: 0;
-    z-index: 100;
 }
 
 .tab-btn {
@@ -182,7 +267,9 @@ body {
 /* Tab 内容 */
 .tab-content {
     padding: 20px 30px;
-    min-height: calc(100vh - 150px);
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 .tab-pane {
@@ -529,4 +616,162 @@ body {
     border: 1px solid #ffccc7;
     border-radius: 4px;
     margin: 20px 30px;
+}
+
+/* ===== 离线页工具栏增强：每页数量 / 时间筛选 / 分页 ===== */
+
+/* 工具栏控件统一高度（28px）：date 输入框内在高度比其他控件大，
+   显隐切换（切 Tab）时会顶高整行产生抖动，固定后行高恒定 */
+.date-input,
+.pagesize-select,
+.pager-btn,
+.pager-jump-input,
+.date-clear {
+    height: 28px;
+    box-sizing: border-box;
+    line-height: normal;
+}
+
+/* 空态的全局搜索按钮不在工具栏内，不受统一高度限制 */
+#globalSearchBtn {
+    height: auto;
+}
+
+/* 工具栏右侧分组（时间筛选位于排序左侧） */
+.toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+/* 每页数量选择 */
+.pagesize-section {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.pagesize-section .label {
+    font-size: 13px;
+    color: #666;
+    font-weight: 500;
+}
+.pagesize-select {
+    padding: 4px 8px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #333;
+    background: #fff;
+    outline: none;
+    cursor: pointer;
+}
+.pagesize-select:focus { border-color: #1890ff; }
+
+/* 时间范围筛选（仅作品视图显示，显隐由 JS 控制） */
+.date-filter-section {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.date-filter-section .label {
+    font-size: 13px;
+    color: #666;
+    font-weight: 500;
+}
+.date-input {
+    padding: 4px 8px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #333;
+    outline: none;
+    font-family: inherit;
+}
+.date-input:focus { border-color: #1890ff; }
+.date-sep { color: #999; font-size: 13px; }
+.date-clear {
+    background: transparent;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    color: #999;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 3px 7px;
+    line-height: 1;
+    transition: all .2s;
+}
+.date-clear:hover { border-color: #ff4d4f; color: #ff4d4f; }
+
+/* 分页条 */
+.pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 24px 0 8px;
+    flex-wrap: wrap;
+}
+.pager-info { font-size: 13px; color: #666; }
+.pager-btns { display: flex; gap: 6px; }
+.pager-btn {
+    padding: 5px 12px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    background: #fff;
+    color: #333;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all .2s;
+}
+.pager-btn:hover:not(:disabled) { border-color: #1890ff; color: #1890ff; }
+.pager-btn:disabled { opacity: .4; cursor: not-allowed; }
+.pager-jump {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 13px;
+    color: #666;
+    white-space: nowrap;
+}
+.pager-jump-input {
+    width: 52px;
+    padding: 4px 6px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #333;
+    text-align: center;
+    outline: none;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+.pager-jump-input:focus { border-color: #1890ff; }
+.pager-jump-input::-webkit-outer-spin-button,
+.pager-jump-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* ===== 顶部固定 + 仅列表滚动布局 ===== */
+
+/* 主内容区撑满剩余高度，内部纵向 flex，使 tab-content 成为唯一滚动区 */
+#content {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 列表以上（含 Tab 导航）的区块固定在顶端，不随列表滚动 */
+.platform-bar,
+.subview-bar,
+.search-container,
+.filter-sort-toolbar,
+.tab-nav {
+    flex-shrink: 0;
+}
+
+/* 分页条移入工具栏后的紧凑样式（覆盖底部大间距与居中） */
+.toolbar-right .pager {
+    padding: 0;
+    justify-content: flex-start;
+    gap: 10px;
 }

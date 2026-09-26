@@ -392,6 +392,9 @@ export class AuthorDownloadManager {
                 }
             }
             
+            // ✅ 同步刷新卡片统计行“🎬 已存 X/Y 作品”（与按钮独立，需单独更新）
+            this.updateAuthorSavedCount(uid, downloadedCount, authorData.workCount);
+            
             // ✅ 持久化到数据库（save = upsert，传入完整对象）
             // 优先使用内存中的完整作者对象；关注列表未加载时回退到数据库已有记录合并
             if (!fullAuthor) {
@@ -540,6 +543,27 @@ export class AuthorDownloadManager {
             checkbox.disabled = true;
             checkbox.checked = false;
             logger.info(`[AuthorDownload] ☑️ 已禁用并取消勾选复选框: ${uid}`);
+        }
+    }
+
+    /**
+     * ✅ 实时刷新作者卡片统计行“🎬 已存 X/Y 作品”
+     * （下载完成后按钮与复选框会更新，但统计行是独立 DOM 节点，需单独刷新）
+     * @param {string} uid - 作者ID
+     * @param {number} downloadedCount - 已下载数量
+     * @param {number} workCount - 总数量
+     */
+    updateAuthorSavedCount(uid, downloadedCount, workCount) {
+        const listEl = document.getElementById('followingList');
+        if (!listEl) return;
+
+        const authorCard = listEl.querySelector(`.author-item[data-uid="${uid}"]`);
+        if (!authorCard) return;
+
+        const savedEl = authorCard.querySelector('.author-saved-count');
+        if (savedEl) {
+            savedEl.textContent = `${downloadedCount || 0}/${workCount || 0}`;
+            logger.info(`[AuthorDownload] 🎬 已刷新作者卡片统计行: ${uid} -> ${downloadedCount || 0}/${workCount || 0}`);
         }
     }
 }

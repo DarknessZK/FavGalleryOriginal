@@ -60,11 +60,15 @@ class MessageHandler {
                     break;
 
                 // ✅ 收藏列表进度消息
+                // 发送源有两套字段名：main.js 批量循环发 current/total（带 collectName），
+                // data-fetcher._loadList 通用进度发 currentCount/totalCount（只带 collectId，消费端反查名称），
+                // 两者均兼容
                 case 'COLLECT_WORKS_PROGRESS':
                     this.app.handleCollectWorksProgress(
                         event.data.collectName,
-                        event.data.current,
-                        event.data.total
+                        event.data.current ?? event.data.currentCount,
+                        event.data.total ?? event.data.totalCount,
+                        event.data.collectId
                     );
                     break;
 

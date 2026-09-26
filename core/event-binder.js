@@ -4,6 +4,7 @@
 // ==========================================
 
 import { createLogger, logToUI } from '../utils/logger.js';
+import { CONFIG } from '../config/constants.js';
 
 const logger = createLogger('EventBinder');
 
@@ -20,6 +21,9 @@ class EventBinder {
 
         // 1. 选择文件夹
         this.bindSelectFolder();
+
+        // 1.5. ✅ 打开本地库（引导）
+        this.bindOpenLibrary();
 
         // 2. Tab 切换
         this.bindTabSwitching();
@@ -82,6 +86,115 @@ class EventBinder {
             });
         } else {
         }
+    }
+
+    /**
+     * ✅ 绑定“打开本地库”按钮（B+ 自动捕获）
+     * 说明：路径不再要用户手输——用户首次手动打开离线页后，background 会反查
+     *      file:// 标签页 URL 自动记住绝对路径。这里点击时先请求 background 一键
+     *      “聚焦已开标签 / 新建标签打开”；只有打不开（没路径 / 未授权）时才展开引导。
+     */
+    bindOpenLibrary() {
+        const btn = document.getElementById('openLibrary');
+        const hint = document.getElementById('openLibraryHint');
+        if (!btn || !hint) {
+            logger.warn('⚠️ 未找到“打开本地库”相关元素');
+            return;
+        }
+
+        // 启动探测：若已记住离线库路径，即便本次未重选文件夹也提前启用按钮
+        this._probeLibrary(btn);
+
+        btn.addEventListener('click', async () => {
+            // 已展开的引导再次点击则收起
+            if (hint.style.display !== 'none') {
+                hint.style.display = 'none';
+                return;
+            }
+
+            // 1) 先尝试一键打开 / 聚焦（路径由后台静默捕获）
+            const res = await this._requestOpenLibrary();
+            if (res && res.ok) {
+                hint.style.display = 'none';
+                logToUI('success', res.action === 'focused'
+                    ? '📂 已切换到已打开的本地库标签页'
+                    : '📂 已在新标签页打开本地库');
+                return;
+            }
+
+            // 2) 打不开 → 展开引导（区分“未授权”与“从没打开过种子”）
+            this._showLibraryGuide(hint, res || {});
+        });
+    }
+
+    /**
+     * 向 background 请求打开/聚焦离线页
+     * @returns {Promise<object|null>}
+     */
+    _requestOpenLibrary() {
+        return new Promise((resolve) => {
+            try {
+                chrome.runtime.sendMessage({ type: 'OPEN_OFFLINE_LIBRARY' }, (resp) => {
+                    if (chrome.runtime.lastError) {
+                        logger.warn('⚠️ 打开本地库消息失败:', chrome.runtime.lastError.message);
+                        resolve(null);
+                        return;
+                    }
+                    resolve(resp || null);
+                });
+            } catch (err) {
+                logger.warn('⚠️ 打开本地库异常:', err && err.message);
+                resolve(null);
+            }
+        });
+    }
+
+    /**
+     * 启动探测：是否已记住离线库路径，据此提前启用按钮
+     * @param {HTMLElement} btn
+     */
+    _probeLibrary(btn) {
+        try {
+            chrome.runtime.sendMessage({ type: 'PROBE_OFFLINE_LIBRARY' }, (resp) => {
+                if (chrome.runtime.lastError || !resp) return;
+                if (resp.hasPath) {
+                    btn.disabled = false;
+                    btn.title = '一键打开本地库（离线页）';
+                    logger.info('📂 已记住离线库路径，按钮提前可用:', resp.url);
+                }
+            });
+        } catch (err) {
+            // 忽略：探测失败不影响后续手动引导
+        }
+    }
+
+    /**
+     * 展开“打开本地库”引导卡（按原因区分文案）
+     * @param {HTMLElement} hint
+     * @param {object} res background 返回 { reason, ... }
+     */
+    _showLibraryGuide(hint, res) {
+        const folderName = this.app.folderName || '你选择的文件夹';
+        const entryName = CONFIG.FILE_SYSTEM.OFFLINE_ENTRY_HTML;
+
+        let body;
+        if (res.reason === 'need-file-access') {
+            // 已捕获路径，但未开「允许访问文件网址」→ 开 file:// 被拦
+            body =
+                `📂 已记住本地库路径，但浏览器拦截了打开操作。<br>` +
+                `请在 <strong>chrome://extensions</strong> → 本扩展「详情」里开启 <strong>「允许访问文件网址」</strong>，之后点这个按钮即可一键直达。<br>`;
+        } else {
+            // 尚无路径（从没打开过）→ 种子引导
+            body =
+                `📂 本地库入口文件：<strong>${entryName}</strong><br>` +
+                `首次使用请手动打开一次：在文件管理器中打开你选择的文件夹「<strong>${folderName}</strong>」，双击其中的 <strong>${entryName}</strong> 即可离线浏览。<br>` +
+                `<span style="color:#8c8c8c;">打开一次后，扩展会自动记住它的位置，<strong>以后点这个按钮就能一键直达</strong>（需在扩展详情开启「允许访问文件网址」）。</span>`;
+        }
+
+        hint.innerHTML = body;
+        hint.style.display = 'block';
+
+        logToUI('info', `📂 打开本地库引导：${res.reason || 'no-path'}`);
     }
 
     /**

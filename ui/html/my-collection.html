@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FavGallery · 离线收藏</title>
+    <!-- 静态壳资源（选文件夹时生成到 .FavGallery/resources/offline-viewer/） -->
+    <link rel="stylesheet" href=".FavGallery/resources/offline-viewer/my-collection.css">
+    <style>
+        /* ===== 补充样式：my-collection.css 未覆盖的离线页专用元素 ===== */
+
+        /* 平台切换栏（≥2 个平台时才显示） */
+        .platform-bar {
+            display: flex;
+            gap: 8px;
+            padding: 12px 30px;
+            background: #fff;
+            border-bottom: 1px solid #e8e8e8;
+            flex-wrap: wrap;
+        }
+        .platform-btn {
+            padding: 6px 16px;
+            border: 1px solid #d9d9d9;
+            border-radius: 16px;
+            background: #fff;
+            color: #666;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all .2s;
+        }
+        .platform-btn:hover { border-color: #1890ff; color: #1890ff; }
+        .platform-btn.active {
+            background: #1890ff;
+            border-color: #1890ff;
+            color: #fff;
+        }
+
+        /* 二级视图返回栏（作者详情 / 收藏夹详情） */
+        .subview-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 30px;
+            background: #fafafa;
+            border-bottom: 1px solid #e8e8e8;
+        }
+        .subview-back {
+            padding: 5px 14px;
+            border: 1px solid #1890ff;
+            border-radius: 6px;
+            background: #1890ff;
+            color: #fff;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all .2s;
+        }
+        .subview-back:hover { background: #40a9ff; border-color: #40a9ff; color: #fff; }
+        .subview-title { font-size: 15px; font-weight: 500; color: #333; }
+        .subview-meta { font-size: 12px; color: #999; }
+
+        /* Tab 计数徽标 */
+        .tab-count { color: #bbb; font-size: 12px; margin-left: 4px; }
+        .tab-btn.active .tab-count { color: #69c0ff; }
+
+        /* 作品卡：媒体类型 / 图集张数角标 */
+        .media-type-badge {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            color: #fff;
+            background: rgba(0, 0, 0, .55);
+            z-index: 11;
+            user-select: none;
+        }
+        .media-type-badge.image-post { background: rgba(114, 46, 209, .8); }
+        .media-type-badge.has-music { background: rgba(19, 194, 194, .85); }
+
+        /* 卡片底部音频播放器 */
+        .card-audio {
+            width: 100%;
+            margin-top: 8px;
+            height: 32px;
+        }
+
+        /* 卡片操作链接 */
+        .card-actions { margin-top: 8px; display: flex; gap: 10px; flex-wrap: wrap; }
+        .card-link {
+            font-size: 12px;
+            color: #1890ff;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .card-link:hover { text-decoration: underline; }
+        .card-link.disabled { color: #bfbfbf; cursor: not-allowed; text-decoration: none; }
+
+        /* 点击放大预览：通用媒体容器 */
+        .cover-preview-body {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            max-width: 90vw;
+            max-height: 90vh;
+        }
+        .cover-preview-body video {
+            max-width: 90vw;
+            max-height: 90vh;
+            border-radius: 8px;
+            background: #000;
+        }
+        /* 图集切换按钮 */
+        .gallery-nav {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 44px;
+            height: 44px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, .2);
+            color: #fff;
+            font-size: 22px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .gallery-nav:hover { background: rgba(255, 255, 255, .35); }
+        .gallery-nav.prev { left: -60px; }
+        .gallery-nav.next { right: -60px; }
+        .gallery-counter {
+            position: absolute;
+            bottom: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-size: 13px;
+        }
+
+        /* 触底续加载提示 */
+        .load-more-hint {
+            text-align: center;
+            padding: 20px;
+            color: #999;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <div class="header">
+            <h1>FavGallery</h1>
+            <div class="subtitle" id="subtitle">离线收藏浏览</div>
+        </div>
+
+        <!-- 加载态 -->
+        <div class="loading-state" id="loading">
+            <div class="spinner"></div>
+            <div>正在加载离线数据…</div>
+        </div>
+
+        <!-- 错误 / 引导态 -->
+        <div id="errorContainer" style="display:none;"></div>
+
+        <!-- 主内容（数据就绪后显示） -->
+        <div id="content" style="display:none;">
+            <!-- 平台栏（≥2 平台才渲染） -->
+            <div class="platform-bar" id="platformBar" style="display:none;"></div>
+
+            <!-- 二级视图返回栏（作者详情 / 收藏夹详情时显示） -->
+            <div class="subview-bar" id="subViewBar" style="display:none;">
+                <button class="subview-back" id="subViewBack">← 返回</button>
+                <span class="subview-title" id="subViewTitle"></span>
+                <span class="subview-meta" id="subViewMeta"></span>
+            </div>
+
+            <!-- 搜索（多关键词小卡片：回车/逗号固化，可单独删除；分片内命中任意词，全局搜索命中全部词） -->
+            <div class="search-container">
+                <div class="search-box" id="searchBox">
+                    <span class="search-chips" id="searchChips"></span>
+                    <input type="text" class="search-input" id="searchInput"
+                           placeholder="搜索当前列表（描述 / 作者 / 收藏夹）；回车或逗号可追加关键词">
+                </div>
+            </div>
+
+            <!-- 筛选 / 每页 / 时间 / 排序 -->
+            <div class="filter-sort-toolbar">
+                <div class="filter-section">
+                    <span class="label">筛选</span>
+                    <label class="filter-item"><input type="radio" name="filter" value="all" checked> 全部</label>
+                    <label class="filter-item"><input type="radio" name="filter" value="downloaded"> 已保存</label>
+                    <label class="filter-item"><input type="radio" name="filter" value="notDownloaded"> 未保存</label>
+                </div>
+                <div class="toolbar-right">
+                    <div class="date-filter-section" id="dateFilterSection" style="display:none;">
+                        <span class="label">时间</span>
+                        <input type="date" class="date-input" id="dateFrom" title="起始日期">
+                        <span class="date-sep">~</span>
+                        <input type="date" class="date-input" id="dateTo" title="结束日期">
+                        <button class="date-clear" id="dateClear" title="清除时间筛选">✕</button>
+                    </div>
+                    <div class="pagesize-section" id="pageSizeSection">
+                        <span class="label">每页</span>
+                        <select class="pagesize-select" id="pageSizeSelect">
+                            <option value="20">20</option>
+                            <option value="40">40</option>
+                            <option value="60" selected>60</option>
+                            <option value="120">120</option>
+                            <option value="240">240</option>
+                        </select>
+                    </div>
+                    <!-- 分页条：从列表底部移到工具栏，位于「每页」与「排序」之间；仅作品视图显示 -->
+                    <div class="pager" id="pager" style="display:none;"></div>
+                    <div class="sort-section">
+                        <span class="label">排序</span>
+                        <label class="sort-item">
+                            <input type="checkbox" id="sortByTime" checked> 时间
+                            <button class="sort-direction" id="dirTime" title="切换升/降序">↓</button>
+                        </label>
+                        <label class="sort-item">
+                            <input type="checkbox" id="sortByStatus"> 保存状态
+                            <button class="sort-direction" id="dirStatus" disabled title="切换升/降序">↓</button>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 列表类型 Tab -->
+            <div class="tab-nav" id="tabNav">
+                <button class="tab-btn active" data-tab="liked">点赞<span class="tab-count" id="countLiked"></span></button>
+                <button class="tab-btn" data-tab="authors">作者<span class="tab-count" id="countAuthors"></span></button>
+                <button class="tab-btn" data-tab="bookmarked">收藏夹<span class="tab-count" id="countBookmarked"></span></button>
+            </div>
+
+            <!-- Tab 内容 -->
+            <div class="tab-content">
+                <!-- 点赞 -->
+                <div class="tab-pane active" id="pane-liked">
+                    <div class="list" id="list-liked"></div>
+                    <div class="load-more-hint" id="more-liked" style="display:none;"></div>
+                    <div class="empty-state" id="empty-liked" style="display:none;">暂无点赞作品</div>
+                </div>
+                <!-- 作者（一级：作者列表；二级：单作者作品） -->
+                <div class="tab-pane" id="pane-authors">
+                    <div class="list" id="list-authors"></div>
+                    <div class="empty-state" id="empty-authors" style="display:none;">暂无作者</div>
+                </div>
+                <!-- 收藏夹（一级：收藏夹清单；二级：单收藏夹作品） -->
+                <div class="tab-pane" id="pane-bookmarked">
+                    <div class="list" id="list-bookmarked"></div>
+                    <div class="empty-state" id="empty-bookmarked" style="display:none;">暂无收藏夹</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 封面悬浮预览（跟随鼠标的小图） -->
+    <div class="cover-hover-preview" id="coverHoverPreview">
+        <img id="hoverPreviewImg" src="" alt="">
+    </div>
+
+    <!-- 点击放大预览（承载 图片 / 视频 / 图集 / 音频） -->
+    <div class="cover-preview-overlay" id="coverPreviewOverlay">
+        <button class="cover-preview-close" id="coverPreviewClose" title="关闭">×</button>
+        <div class="cover-preview-body" id="coverPreviewBody"></div>
+    </div>
+
+    <!-- 经典脚本（file:// 不支持 ES module）：core → features → index -->
+    <script src=".FavGallery/resources/offline-viewer/core.js"></script>
+    <script src=".FavGallery/resources/offline-viewer/features.js"></script>
+    <script src=".FavGallery/resources/offline-viewer/index.js"></script>
+
+    <!-- 首屏看门狗：不依赖外部 JS。若静态壳/离线数据缺失（如首次使用尚未选文件夹、
+         或选完文件夹后台仍在生成），外部 JS 加载失败会导致 #loading 无限转圈；
+         超时后强制展示友好的首次使用引导。 -->
+    <script>
+    (function () {
+        var WATCHDOG_MS = 6000;
+        function guideHtml() {
+            return '<div class="error-message" style="text-align:center;">' +
+                '<div style="font-size:40px;line-height:1;margin-bottom:12px;">👋</div>' +
+                '<h2 style="margin:0 0 10px;font-size:18px;color:#333;">欢迎使用 FavGallery 离线收藏页</h2>' +
+                '<p style="color:#666;line-height:1.7;margin:0 0 8px;">还没有找到可展示的离线数据，常见原因：</p>' +
+                '<ol style="color:#666;line-height:1.9;text-align:left;margin:0 auto 14px;max-width:440px;padding-left:20px;">' +
+                '<li>你还没有在扩展中<b>选择本地文件夹</b>；</li>' +
+                '<li>刚选完文件夹，数据正在后台<b>生成中</b>（首次生成需数秒到数十秒）。</li>' +
+                '</ol>' +
+                '<p style="color:#333;line-height:1.9;margin:0 auto 14px;max-width:460px;">请依次操作：打开抖音 / 小红书页面 → 在 FavGallery 侧边栏点击<b>「选择文件夹」</b> → 等待扩展提示生成完成 → <b>刷新本页</b>。</p>' +
+                '<span style="color:#999;font-size:12px;">期望数据路径：<code>.FavGallery/metadata/offline-index.js</code></span>' +
+                '</div>';
+        }
+        // 暴露给外部 index.js 复用，保证两条路径文案一致
+        window.__favGalleryGuideHtml = guideHtml;
+        setTimeout(function () {
+            var loading = document.getElementById('loading');
+            var content = document.getElementById('content');
+            var errBox = document.getElementById('errorContainer');
+            var loadingVisible = loading && loading.style.display !== 'none';
+            var contentVisible = content && content.style.display === 'block';
+            var errShown = errBox && errBox.style.display === 'block' && errBox.innerHTML.trim() !== '';
+            if (loadingVisible && !contentVisible && !errShown) {
+                if (loading) loading.style.display = 'none';
+                if (errBox) { errBox.style.display = 'block'; errBox.innerHTML = guideHtml(); }
+            }
+        }, WATCHDOG_MS);
+    })();
+    </script>
+</body>
+</html>

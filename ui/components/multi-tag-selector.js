@@ -181,6 +181,11 @@ export class MultiTagSelector {
      * @private
      */
     _bindEvents() {
+        // ✅ 防重复绑定：监听目标是持久 DOM（trigger/标签容器/document），
+        // 同一实例重复 init 叠加监听会导致下拉 toggle 多次、偶数次时永远打不开
+        if (this._eventsBound) return;
+        this._eventsBound = true;
+
         const { dropdownTrigger, tagsContainer, selectAllBtn, clearAllBtn } = this.elements;
 
         // 绑定触发器点击事件（展开/收起）

@@ -156,7 +156,11 @@ export async function saveBookmarkedWorks(fileSystem, data) {
     await database.save('works', worksToSave);
     
     // 2. 更新收藏夹元数据
+    // ✅ 合并已有记录：database.save 是 put（整体覆盖），若只传部分字段会丢失
+    //    collectName/isDeleted/sortOrder，导致离线页收藏夹显示为“未命名收藏夹”
+    const existingCollect = await database.get('collects', collectId);
     await database.save('collects', {
+        ...(existingCollect || {}),
         collectId: collectId,
         workCount: works.length,
         lastUpdate: Date.now()

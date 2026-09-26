@@ -47,6 +47,18 @@ export class Database {
             request.onsuccess = () => {
                 this.db = request.result;
                 logger.info('✅ IndexedDB 初始化成功');
+
+                // ✅ 监听连接失效：其他上下文升级版本/删除数据库时触发 versionchange，
+                //    主动关闭并置空，下次操作由 _transaction 重连，避免 "connection is closing" 报错
+                this.db.onversionchange = () => {
+                    logger.warn('⚠️ 收到 versionchange，关闭当前连接以便重连');
+                    try { this.db && this.db.close(); } catch (_) { /* 忽略 */ }
+                    this.db = null;
+                };
+                this.db.onclose = () => {
+                    logger.warn('⚠️ IndexedDB 连接意外关闭，置空以便重连');
+                    this.db = null;
+                };
                 
                 // ✅ Sidebar 上下文中跳过恢复（由 Content Script 管理数据）
                 const isSidebar = window.location.href.startsWith('chrome-extension://');
@@ -100,10 +112,9 @@ export class Database {
      * @returns {Promise<void>}
      */
     async save(storeName, data) {
-        await this._ensureInitialized();
+        const transaction = await this._transaction([storeName], 'readwrite');
 
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([storeName], 'readwrite');
             const store = transaction.objectStore(storeName);
 
             // 支持批量保存
@@ -138,10 +149,9 @@ export class Database {
      * @returns {Promise<Object|null>} 查询结果
      */
     async get(storeName, key) {
-        await this._ensureInitialized();
+        const transaction = await this._transaction([storeName], 'readonly');
 
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([storeName], 'readonly');
             const store = transaction.objectStore(storeName);
 
             const request = store.get(key);
@@ -165,10 +175,9 @@ export class Database {
      * @returns {Promise<Array>} 所有记录
      */
     async getAll(storeName) {
-        await this._ensureInitialized();
+        const transaction = await this._transaction([storeName], 'readonly');
 
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([storeName], 'readonly');
             const store = transaction.objectStore(storeName);
 
             const request = store.getAll();
@@ -194,14 +203,13 @@ export class Database {
      * @returns {Promise<Array>} 查询结果
      */
     async getByIds(storeName, keys) {
-        await this._ensureInitialized();
-
         if (!keys || keys.length === 0) {
             return [];
         }
 
+        const transaction = await this._transaction([storeName], 'readonly');
+
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([storeName], 'readonly');
             const store = transaction.objectStore(storeName);
 
             const results = [];
@@ -243,10 +251,9 @@ export class Database {
      * @returns {Promise<Array>} 查询结果
      */
     async getByIndex(storeName, indexName, key) {
-        await this._ensureInitialized();
+        const transaction = await this._transaction([storeName], 'readonly');
 
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([storeName], 'readonly');
             const store = transaction.objectStore(storeName);
             
             // 检查索引是否存在
@@ -280,10 +287,9 @@ export class Database {
      * @returns {Promise<void>}
      */
     async delete(storeName, key) {
-        await this._ensureInitialized();
+        const transaction = await this._transaction([storeName], 'readwrite');
 
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([storeName], 'readwrite');
             const store = transaction.objectStore(storeName);
 
             const request = store.delete(key);
@@ -307,10 +313,9 @@ export class Database {
      * @returns {Promise<void>}
      */
     async clear(storeName) {
-        await this._ensureInitialized();
+        const transaction = await this._transaction([storeName], 'readwrite');
 
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([storeName], 'readwrite');
             const store = transaction.objectStore(storeName);
 
             const request = store.clear();
@@ -396,11 +401,39 @@ export class Database {
      * @private
      */
     async _ensureInitialized() {
-        // ✅ 检查数据库是否存在且未关闭
-        if (!this.db || this.db.closed) {
-            logger.info('📦 数据库未初始化或已关闭，重新初始化...');
+        // ✅ IDBDatabase 没有 closed 属性，仅能判断连接对象是否存在；
+        //    连接进入 closing 状态时 this.db 仍非空，由 _transaction 捕获 InvalidStateError 后重连
+        if (!this.db) {
+            logger.info('📦 数据库未初始化，重新初始化...');
             await this.init();
         }
+    }
+
+    /**
+     * 创建事务（带自动重连）
+     * 当连接因 versionchange/被删除/异常而进入 closing 状态时，
+     * this.db.transaction() 会抛 InvalidStateError；此处丢弃失效连接、重连后重试一次
+     * @private
+     * @param {string[]} storeNames - 存储名称数组
+     * @param {string} mode - 事务模式（readonly | readwrite）
+     * @returns {Promise<IDBTransaction>}
+     */
+    async _transaction(storeNames, mode) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+            await this._ensureInitialized();
+            try {
+                return this.db.transaction(storeNames, mode);
+            } catch (err) {
+                if (err && err.name === 'InvalidStateError' && attempt === 0) {
+                    logger.warn('⚠️ IndexedDB 连接不可用（closing），丢弃并重连后重试...');
+                    try { this.db && this.db.close(); } catch (_) { /* 忽略 */ }
+                    this.db = null;
+                    continue;
+                }
+                throw err;
+            }
+        }
+        throw new Error('无法创建 IndexedDB 事务（重连后仍失败）');
     }
 }
 

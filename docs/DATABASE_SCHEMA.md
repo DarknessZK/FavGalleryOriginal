@@ -125,6 +125,7 @@ IndexedDB (主存储)
 | music.title | string | 是 | 音乐标题 |
 | music.author | string | 是 | 音乐作者 |
 | music.audioUrl | string | 是 | 音频URL |
+| isDeleted | boolean | 是 | 软删除标记（默认 false）；平台侧取消点赞/移出收藏夹后由 `_mergeItems` 标记为 true |
 
 **示例数据：**
 {
@@ -155,7 +156,8 @@ music: {
 title: "背景音乐",
 author: "歌手",
 audioUrl: "https://sf.douyin.com/xxx.mp3"
-}
+},
+isDeleted: false
 }
 
 **设计说明：**
@@ -163,6 +165,7 @@ audioUrl: "https://sf.douyin.com/xxx.mp3"
 - video 和 images 字段互斥（视频类型 video 有值，图集类型 images 有值）
 - createTime 使用秒级时间戳，便于按季度分片备份
 - author 嵌套对象只存储必要字段，完整作者信息存储在 authors 表
+- isDeleted 支持软删除：平台侧取消点赞/移出收藏夹后，刷新列表时由 `_mergeItems` 标记，不物理删除记录
 
 ---
 
@@ -239,6 +242,10 @@ createdAt: 1713801600000
 - 支持任意实体类型的多对多关系，无需为每种关系创建独立表
 - 唯一索引防止同一关系被重复插入
 - 不存储 extra 字段，遵循最小化原则，未来需要时通过数据库升级添加
+- **删除策略（两套机制，追溯需求不同）**：
+  - **机制一 · 平台驱动软删除（已实现）**：平台侧取消点赞/取关/移出收藏夹后，刷新列表时给**实体**（works/authors/collects）打 `isDeleted=true`，relations 边保持不变（只插入不删除），以便追溯与恢复。
+  - **机制二 · 用户主动本地删除（预留，未实现，优先级低）**：用户在界面删除已下载作品时，用 `removeRelation` **物理删除**对应关系边，并**同步删除 `completed_works` 记录**（保留 works 元数据与本地物理文件），以便日后重新下载。此机制无需追溯"曾经收藏过"，故不走 isDeleted、也不让 relations 表冗余。
+  - 注：relations 表**不设 isDeleted 字段**；"失效关系"语义由实体表的 isDeleted 承载。
 
 ---
 

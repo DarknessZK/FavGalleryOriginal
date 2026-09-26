@@ -34,10 +34,12 @@
 
 | 文档 | 说明 | 适用人群 |
 |------|------|---------|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | 五层架构、模块详解、数据流图 | 架构师、高级开发者 |
 | [DEVELOPMENT_RULES.md](./DEVELOPMENT_RULES.md) | **完整的开发规范**（782行） | **所有开发者** ⭐ |
 | [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) | 数据库设计、表结构、索引 | 后端开发者 |
 | [FILE_SYSTEM_STRUCTURE.md](./FILE_SYSTEM_STRUCTURE.md) | 文件系统目录结构 | 所有开发者 |
+| [CONFIG_SYSTEM.md](./CONFIG_SYSTEM.md) | 配置系统设计（config.json + 规划中的配置面板） | 所有开发者 |
+| [OFFLINE_COLLECTION_VIEWER.md](./OFFLINE_COLLECTION_VIEWER.md) | 离线收藏浏览页（FavGallery.html）设计（三维分片+懒加载+平台多级分页，已实现待实机验证） | 所有开发者 |
+| [OPEN_LOCAL_LIBRARY.md](./OPEN_LOCAL_LIBRARY.md) | 侧边栏「打开本地库」B+ 一键打开（反查 file:// 标签页 URL 自动获取绝对路径） | 所有开发者 |
 
 ### 📝 开发指南
 
@@ -45,8 +47,7 @@
 |------|------|---------|
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | 贡献者指南、开发流程 | 新贡献者 |
 | [QUICK_REFERENCE.md](./QUICK_REFERENCE.md) | **快速参考卡片**（禁止事项、必遵守项） | **所有开发者** 💡 |
-| [MEMORY_GUIDE.md](./MEMORY_GUIDE.md) | 记忆清理指南、建议保留的记忆 | 维护者 |
-| [TODO.md](./TODO.md) | 待办事项、未来规划 | 维护者 |
+| [FEATURE_COMPLETENESS.md](./FEATURE_COMPLETENESS.md) | 功能完成度清单、待办事项、优先级建议 | 维护者 |
 
 ### 🔍 代码审查
 
@@ -54,13 +55,6 @@
 |------|------|---------|
 | [CODE_REVIEW_SYSTEM.md](./CODE_REVIEW_SYSTEM.md) | 审查流程、决策树、评分卡 | 审查者 |
 | [PULL_REQUEST_TEMPLATE.md](../.github/PULL_REQUEST_TEMPLATE.md) | PR 检查清单模板 | 所有提交 PR 的人 |
-| [CODEOWNERS](../.github/CODEOWNERS) | 代码所有者配置 | 维护者 |
-
-### 🌐 API 文档
-
-| 文档 | 说明 | 适用人群 |
-|------|------|---------|
-| [API.md](./API.md) | 平台适配器、API 方法说明 | API 开发者 |
 
 ---
 
@@ -73,7 +67,7 @@ Day 1: 阅读 README.md → 了解项目
 Day 2: 阅读 CONTRIBUTING.md → 了解如何贡献
 Day 3: 阅读 QUICK_REFERENCE.md → 记住禁止事项
 Day 4-5: 搭建开发环境，尝试修复简单 Bug
-Day 6-7: 阅读 ARCHITECTURE.md → 理解整体架构
+Day 6-7: 阅读 FEATURE_COMPLETENESS.md → 了解功能全貌
 ```
 
 ### 中级开发者（第2-4周）
@@ -137,7 +131,6 @@ Config Layer (config/)   → 全局配置
 | QUICK_REFERENCE.md | 🔥 高 | 所有开发者 | 每月 |
 | DEVELOPMENT_RULES.md | 🔥 高 | 所有开发者 | 每季度 |
 | CONTRIBUTING.md | 🟡 中 | 新贡献者 | 半年 |
-| ARCHITECTURE.md | 🟡 中 | 高级开发者 | 季度 |
 | CODE_REVIEW_SYSTEM.md | 🟢 低 | 审查者 | 季度 |
 
 ---
@@ -169,7 +162,7 @@ A: 按照 [学习路径](#-学习路径) 的建议，从 README → CONTRIBUTING
 ### 何时更新文档？
 
 - ✅ 新增功能时 → 更新相关文档
-- ✅ 修改架构时 → 更新 ARCHITECTURE.md
+- ✅ 修改架构时 → 更新相关架构与完成度文档
 - ✅ 发现规范漏洞时 → 更新 DEVELOPMENT_RULES.md
 - ✅ 收到常见问题时 → 更新 FAQ 或 QUICK_REFERENCE.md
 
