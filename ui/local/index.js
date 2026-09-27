@@ -36,8 +36,11 @@
         collects: { subId: null, subWorks: [] },
         global: { index: null, active: false, works: [] },  // 全局搜索：索引缓存 / 结果态
         filter: 'all',
-        sortKey: 'time',
-        sortDir: 'desc',
+        // ✅ 多维排序：sortOrder = 已启用维度（按勾选顺序定主次，先选为主键）；
+        //    sortDirs = 各维度的升/降设定（未启用也保留，点选项文本可随时预览切换）
+        //    空 sortOrder = 不排序（保留离线数据的生成顺序）
+        sortOrder: ['time'],
+        sortDirs: { time: 'desc', status: 'desc' },
         keyword: '',
         keywords: [],            // 已固化的多关键词小卡片（与正在输入的 keyword 叠加过滤；分片内 OR，全局搜索 AND）
         dateFrom: '',            // 时间筛选起始（YYYY-MM-DD，空=不限）
@@ -265,8 +268,11 @@
     }
 
     function isDefaultView() {
+        // 默认：仅启用时间且为降序
+        const onlyTimeDesc = state.sortOrder.length === 1 &&
+            state.sortOrder[0] === 'time' && state.sortDirs.time === 'desc';
         return state.filter === 'all' && state.keyword === '' && state.keywords.length === 0 &&
-            state.sortKey === 'time' && state.sortDir === 'desc' &&
+            onlyTimeDesc &&
             !state.dateFrom && !state.dateTo;
     }
 
@@ -808,48 +814,82 @@
             });
         }
 
-        // 排序（互斥 + 方向）
-        bindSort('sortByTime', 'dirTime', 'time');
-        bindSort('sortByStatus', 'dirStatus', 'status');
+        // 排序（多选叠加；方框=启用/停用，文本与箭头=升降）
+        bindSort('sortByTime', 'dirTime', 'sortTextTime', 'time');
+        bindSort('sortByStatus', 'dirStatus', 'sortTextStatus', 'status');
+        syncSortUI();
 
         // 作者卡片点击（core 委托回调）
         core.__onOpenAuthor = openAuthor;
     }
 
-    function bindSort(checkId, dirId, key) {
+    /** 该维度是否已启用（在排序栈中） */
+    function sortEnabled(key) {
+        return state.sortOrder.indexOf(key) !== -1;
+    }
+
+    /**
+     * 由 state（sortOrder + sortDirs）反推控件状态（勾选 / 箭头字符 / 提示）
+     * state 是唯一真源，UI 永远被它覆写，避免旧实现“互斥时置灰、回落时不恢复”导致的箭头永久置灰
+     */
+    function syncSortUI() {
+        const dims = [['time', 'sortByTime', 'dirTime', 'sortTextTime'],
+            ['status', 'sortByStatus', 'dirStatus', 'sortTextStatus']];
+        dims.forEach(function (d) {
+            const idx = state.sortOrder.indexOf(d[0]);
+            const on = idx !== -1;
+            const asc = state.sortDirs[d[0]] === 'asc';
+            const chk = $(d[1]);
+            const dir = $(d[2]);
+            const txt = $(d[3]);
+            if (chk) chk.checked = on;
+            if (dir) dir.textContent = asc ? '↑' : '↓';
+            // 提示里带上该维度的优先级，让“先勾选为主键”可被发现
+            const rank = on ? (idx === 0 ? '主键' : '第 ' + (idx + 1) + ' 优先级') : '未启用';
+            const tip = '点击切换' + (d[0] === 'time' ? '时间' : '保存状态') + '升/降序（当前'
+                + (asc ? '升序' : '降序') + '・' + rank + '）';
+            if (dir) dir.title = tip;
+            if (txt) txt.title = tip + (on ? '' : '；点左侧方框可启用');
+        });
+    }
+
+    /** 翻转某维度的升/降序；仅该维度已启用时才需重排列表 */
+    function toggleSortDir(key) {
+        state.sortDirs[key] = state.sortDirs[key] === 'asc' ? 'desc' : 'asc';
+        syncSortUI();
+        if (sortEnabled(key)) rerenderCurrent();
+    }
+
+    /**
+     * 绑定单个排序维度
+     * 交互约定（职责分离）：
+     *  - 左侧方框：仅负责启用/停用；启用时追加到排序栈末尾（先选为主键，后选为次级键），停用则从栈中移除
+     *  - 选项文本与右侧箭头：仅负责翻转该维度的升/降序，不改启用状态（未启用也可预先设定）
+     */
+    function bindSort(checkId, dirId, textId, key) {
         const chk = $(checkId);
         const dir = $(dirId);
+        const txt = $(textId);
+
         if (chk) chk.addEventListener('change', function () {
+            const i = state.sortOrder.indexOf(key);
             if (chk.checked) {
-                // 互斥：取消其他排序维度
-                ['sortByTime', 'sortByStatus'].forEach(function (id) {
-                    if (id !== checkId) {
-                        const other = $(id);
-                        if (other) other.checked = false;
-                        const otherDir = $(id === 'sortByTime' ? 'dirTime' : 'dirStatus');
-                        if (otherDir) otherDir.disabled = true;
-                    }
-                });
-                if (dir) dir.disabled = false;
-                state.sortKey = key;
-                state.sortDir = dir && dir.textContent === '↑' ? 'asc' : 'desc';
-                rerenderCurrent();
-            } else {
-                // 全部取消 → 回默认时间降序
-                const timeChk = $('sortByTime');
-                if (timeChk && !$('sortByStatus').checked) { timeChk.checked = true; }
-                if (dir) dir.disabled = true;
-                state.sortKey = 'time';
-                state.sortDir = 'desc';
-                rerenderCurrent();
+                if (i === -1) state.sortOrder.push(key);
+            } else if (i !== -1) {
+                state.sortOrder.splice(i, 1);
             }
-        });
-        if (dir) dir.addEventListener('click', function (e) {
-            e.preventDefault();
-            if (dir.disabled) return;
-            dir.textContent = dir.textContent === '↓' ? '↑' : '↓';
-            state.sortDir = dir.textContent === '↑' ? 'asc' : 'desc';
+            syncSortUI();
             rerenderCurrent();
+        });
+
+        if (txt) txt.addEventListener('click', function () {
+            toggleSortDir(key);
+        });
+
+        if (dir) dir.addEventListener('click', function (e) {
+            // 箭头已不在 label 内， preventDefault 仅防默认行为残留
+            e.preventDefault();
+            toggleSortDir(key);
         });
     }
 

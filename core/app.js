@@ -4,6 +4,7 @@
 // ==========================================
 
 import { createLogger, logToUI } from '../utils/logger.js';
+import { installErrorBoundary } from '../utils/error-boundary.js';
 import { escapeHtml } from '../utils/ui-helpers.js';
 import { TabManager } from '../ui/components/tab-manager.js';
 import { UIStateManager } from '../ui/ui-state-manager.js';
@@ -13,6 +14,8 @@ import { EventBinder } from './event-binder.js';
 import { ListDisplayManager } from './list-display-manager.js';
 import { DownloadHandler } from './download-handler.js';
 import { AuthorDownloadManager } from './author-download-manager.js';
+import { AuthorWorksView } from './author-works-view.js';
+import { ConfigPanel } from './config-panel.js';
 import { MultiTagSelector } from '../ui/components/multi-tag-selector.js';
 import { CONFIG } from '../config/constants.js';
 import { WorkListManager } from '../utils/work-list-manager.js';
@@ -25,8 +28,8 @@ class App {
         // 当前激活的平台
         this.currentPlatform = CONFIG.ACTIVE_PLATFORM;
 
-        // 当前激活的 Tab
-        this.currentActiveTab = 'following';
+        // 当前激活的 Tab（默认与侧边栏首个 Tab 「点赞列表」保持一致，需与 sidebar.html 的 active/默认显示面板同步）
+        this.currentActiveTab = 'liked';
 
         // 用户信息
         this.userInfo = null;
@@ -64,6 +67,12 @@ class App {
         
         // ✅ 关注列表管理器（作者列表）
         this.followingManager = new WorkListManager({ type: 'following' });
+
+        // ✅ 作者作品钻取子视图（关注 Tab 内只读展示，需在 eventBinder.bind() 前创建）
+        this.authorWorksView = new AuthorWorksView(this);
+
+        // ✅ 界面配置面板（读写 config.json，经 Content Script 消息通道代理）
+        this.configPanel = new ConfigPanel(this);
         
         // ✅ 收藏夹多选标签选择器
         this.collectsSelector = null; // 稍后初始化
@@ -76,6 +85,12 @@ class App {
      */
     async init() {
         logger.info('🚀 系统初始化开始...');
+
+        // ✅ 全局错误边界：未捕获异常/未处理 rejection → 红条提示 + 日志（同文案去重计数）
+        installErrorBoundary({
+            context: 'Sidebar',
+            onError: ({ message, count }) => this._showErrorBanner(message, count)
+        });
         logger.debug('📄 当前 DOM 状态:', {
             readyState: document.readyState,
             bodyExists: !!document.body,
@@ -107,7 +122,37 @@ class App {
         // ✅ 初始化侧边栏模式切换开关
         this.initSidebarModeToggle();
 
+        // ✅ 初始化配置面板（折叠/保存/恢复默认事件）
+        this.configPanel.init();
+
         logger.info('✅ 系统初始化完成，就绪');
+    }
+
+    /**
+     * ✅ 显示错误边界提示条（连续错误由边界合并计数后传入）
+     * @param {string} message - 错误文案（含堆栈，展示首行摘要）
+     * @param {number} count - 去重窗口内累计次数
+     */
+    _showErrorBanner(message, count = 1) {
+        const banner = document.getElementById('errorBanner');
+        const text = document.getElementById('errorBannerText');
+        const summary = String(message || '').split('\n')[0];
+
+        if (banner && text) {
+            text.textContent = `⚠️ 运行异常${count > 1 ? ` (x${count})` : ''}：${summary}`;
+            banner.style.display = 'flex';
+
+            // 关闭按钮（事件委托一次即可，重复 add 会叠加，故用标记）
+            const closeBtn = document.getElementById('errorBannerClose');
+            if (closeBtn && !closeBtn.dataset.bound) {
+                closeBtn.dataset.bound = '1';
+                closeBtn.addEventListener('click', () => {
+                    banner.style.display = 'none';
+                });
+            }
+        }
+
+        logToUI('error', `⚠️ 未捕获错误${count > 1 ? ` (x${count})` : ''}：${summary}`);
     }
 
     /**
@@ -601,6 +646,14 @@ class App {
      */
     async handleBookmarkedDownload(workIds) {
         await this.downloadHandler.handleBookmarkedDownload(workIds);
+    }
+
+    /**
+     * ✅ 作者作品钻取视图批量下载（独立入口）
+     * @param {Array} workIds - 作品ID数组
+     */
+    async handleAuthorWorksDownload(workIds) {
+        await this.downloadHandler.handleAuthorWorksDownload(workIds);
     }
 
     /**

@@ -27,6 +27,12 @@ class BatchSelectionManager {
                 selectedAuthorIds: new Set(),
                 selectAll: false,
                 totalCount: 0
+            },
+            // ✅ 作者作品钻取视图（与点赞/收藏同规格的批量选择）
+            authorWorks: {
+                selectedWorkIds: new Set(),
+                selectAll: false,
+                totalCount: 0
             }
         };
     }
@@ -92,6 +98,8 @@ class BatchSelectionManager {
             allItems = this.app.bookmarkedManager.allWorks || [];
         } else if (listType === 'following') {
             allItems = this.app.followingManager.allAuthors || [];
+        } else if (listType === 'authorWorks') {
+            allItems = this.app.authorWorksView?.manager.allWorks || [];
         }
         
         // ✅ 调试日志：检查数据是否正确加载
@@ -159,6 +167,11 @@ class BatchSelectionManager {
         } else if (listType === 'following') {
             const startIndex = (this.app.followingManager.currentPage - 1) * this.app.followingManager.pageSize;
             const endIndex = startIndex + this.app.followingManager.pageSize;
+            currentPageItems = allItems.slice(startIndex, endIndex);
+        } else if (listType === 'authorWorks') {
+            const awManager = this.app.authorWorksView?.manager;
+            const startIndex = (awManager.currentPage - 1) * awManager.pageSize;
+            const endIndex = startIndex + awManager.pageSize;
             currentPageItems = allItems.slice(startIndex, endIndex);
         }
         
@@ -353,6 +366,11 @@ class BatchSelectionManager {
         } else if (listType === 'following') {
             const startIndex = (this.app.followingManager.currentPage - 1) * this.app.followingManager.pageSize;
             const endIndex = startIndex + this.app.followingManager.pageSize;
+            return allItems.slice(startIndex, endIndex);
+        } else if (listType === 'authorWorks') {
+            const awManager = this.app.authorWorksView?.manager;
+            const startIndex = (awManager.currentPage - 1) * awManager.pageSize;
+            const endIndex = startIndex + awManager.pageSize;
             return allItems.slice(startIndex, endIndex);
         }
         return [];

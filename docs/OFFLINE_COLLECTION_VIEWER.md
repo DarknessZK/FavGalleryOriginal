@@ -4,9 +4,10 @@
 >
 > **状态图例**：✅ 已实现　🔜 规划中（设计已定，尚未落地）　❌ 未实现
 >
-> **总体状态**：✅ 数据生成器、静态壳生成器、消费端（HTML/core/index/features）、触发时机接入均已实现，序列化改为浏览器安全格式；v2.6 落地全局搜索索引与观察 C/D 修复，实机验证已于 2026-09-26 通过（分页/一键打开）。
+> **总体状态**：✅ 数据生成器、静态壳生成器、消费端（HTML/core/index/features）、触发时机接入均已实现，序列化改为浏览器安全格式；v2.6 落地全局搜索索引与观察 C/D 修复，实机验证已于 2026-09-26 通过（分页/一键打开）；v2.8（2026-09-27）排序控件升级为多维叠加 + 交互职责分离，实机验证已通过。
 >
-> **最后更新**：2026-09-26（v2.7.3：全局搜索提示文案简化 + 工具栏控件统一 28px 高防切换抖动；v2.7.2：多词匹配定稿——分片内 OR / 全局 AND 固定语义仅文字提示；v2.7：搜索框多关键词小卡片（chip）；v2.6.1：全局搜索结果视图体验修正——蓝色退出钮移至筛选栏、Tab 去高亮、「📚 来自」来源标注；v2.6：全局搜索索引 `search-index.js` + 离线页跨分片检索、观察 C 封面远程回退、观察 D 图集落盘校验；v2.5：列表内分页/每页/时间筛选/跳至页输入框、顶部固定仅列表滚动布局、静态壳资源 `?v=` 缓存击穿；侧边栏新增「打开本地库」B+ 一键打开，详见 OPEN_LOCAL_LIBRARY.md；v2.4：收藏夹显示与作者计数三处修复；v2.3：入口文件更名为 `FavGallery.html`，新增首屏看门狗友好引导；v2.2：序列化改用 `serializeForBrowser` 双引号字符串字面量）
+> **最后更新**：2026-09-27（v2.8：排序升级为**多维叠加**（`state.sortOrder` + `state.sortDirs`）并拆分控件职责（方框=启用/停用、文本与箭头=升/降），方向箭头不再置灰；Tab 顺序改为 点赞→收藏夹→作者（与侧边栏一致，pane DOM 同序）；详见 8.7）  
+> **此前更新**：2026-09-26（v2.7.3：全局搜索提示文案简化 + 工具栏控件统一 28px 高防切换抖动；v2.7.2：多词匹配定稿——分片内 OR / 全局 AND 固定语义仅文字提示；v2.7：搜索框多关键词小卡片（chip）；v2.6.1：全局搜索结果视图体验修正——蓝色退出钮移至筛选栏、Tab 去高亮、「📚 来自」来源标注；v2.6：全局搜索索引 `search-index.js` + 离线页跨分片检索、观察 C 封面远程回退、观察 D 图集落盘校验；v2.5：列表内分页/每页/时间筛选/跳至页输入框、顶部固定仅列表滚动布局、静态壳资源 `?v=` 缓存击穿；侧边栏新增「打开本地库」B+ 一键打开，详见 OPEN_LOCAL_LIBRARY.md；v2.4：收藏夹显示与作者计数三处修复；v2.3：入口文件更名为 `FavGallery.html`，新增首屏看门狗友好引导；v2.2：序列化改用 `serializeForBrowser` 双引号字符串字面量）
 
 ---
 
@@ -259,7 +260,7 @@ offline_manifest = {
 
 ```
 平台分页（仅渲染有离线数据的平台；单平台时不显示此栏，直接进二级）
-   └── 列表类型分页：点赞（默认） / 作者 / 收藏夹
+   └── 列表类型分页：点赞（默认） / 收藏夹 / 作者（v2.8 调序，与侧边栏一致；Tab 按钮与 pane DOM 同序，`switchTab` 按 `data-tab`/id 取元素，换序无需改 JS）
           └── 作者页可再点进单作者，浏览其全部作品
 ```
 
@@ -281,8 +282,8 @@ offline_manifest = {
 - 主内容 `#content`
   - 平台栏（条件渲染）
   - 搜索框 `#searchInput`
-  - 筛选/排序工具栏 `.filter-sort-toolbar`（筛选：全部/已保存/未保存；排序：保存状态/时间/大小，各带方向切换）
-  - 列表类型 Tab 导航 `.tab-nav`（点赞/作者/收藏夹，各带计数）
+  - 筛选/排序工具栏 `.filter-sort-toolbar`（筛选：全部/已保存/未保存；排序：时间/保存状态 可叠加，各带方向切换，见 8.7）
+  - 列表类型 Tab 导航 `.tab-nav`（点赞/收藏夹/作者，各带计数）
   - Tab 内容 `.tab-content`（各含 `.list` + `.empty-state`）
 - 封面悬浮预览 `#coverHoverPreview`
 
@@ -311,6 +312,23 @@ offline_manifest = {
 - **翻页滚动**：`goToPage` 重渲染后将列表滚动容器 `.tab-content` 平滑滚回顶部（非 window）
 - **布局**：头部/平台栏/二级视图栏/搜索/工具栏/Tab 导航全部固定在滚动容器之外，**仅列表 `.tab-content` 滚动**
 - 样式：`ui/css/my-collection.css` 的 `.pager`/`.pager-btn`/`.pager-jump` 系列
+
+### 8.7 排序：多维叠加与职责分离（v2.8，2026-09-27）
+
+作用于**作品视图**（点赞/作者详情/收藏夹详情，含全局搜索结果）；作者一级列表走 `filterAuthors()`。
+
+- **状态模型**（`ui/local/index.js` 的 `state`，两个字段均为唯一真源）：
+  - `sortOrder: ['time']` —— 已启用的排序维度，**按勾选顺序定优先级**（先选为主键，后选追加为次级键）；空数组 = 不排序（靠 `Array.sort` 稳定性保留生成顺序）
+  - `sortDirs: { time: 'desc', status: 'desc' }` —— 各维度的升/降设定，**未启用也保留**（可预先调好方向，启用即生效）
+  - 默认视图即 `sortOrder=['time']` + `time:'desc'`（`isDefaultView()` 据此判定是否显示「共 N 条」类默认文案）
+- **控件职责分离**（`.sort-section`，每维度一行：方框 + `.sort-text` + `.sort-direction` 箭头）：
+  - 左侧**方框**（`#sortByTime`/`#sortByStatus`）：只管启用/停用（启用→追加到 `sortOrder` 末尾；停用→仅从 `sortOrder` 移除）
+  - 选项**文本**（`#sortTextTime`/`#sortTextStatus`）与右侧**箭头**（`#dirTime`/`#dirStatus`）：只翻转该维度的升/降序，**不改启用状态**
+  - HTML 不再用 `<label class="sort-item">` 包裹整行（否则点文本会被浏览器转发成切换 checkbox），改 `span` + 裸 checkbox；CSS 相应取消 `.sort-item` 整块 `cursor:pointer`，`.sort-text` 单独给手型与悬停高亮
+- **UI 反推**：`syncSortUI()` 一律由 `sortOrder`/`sortDirs` 覆写勾选、箭头字符（↑/↓）与 title（展示「主键 / 第 N 优先级 / 未启用」）；**箭头按钮不再 `disabled`**——已启用维度文本与箭头一同高亮
+  > 旧实现（双复选框互斥）的永久置灰 bug：取消时间时把箭头 `disabled=true`、互斥分支又关掉对方箭头，回落时无人恢复。现由“state 单向反推 UI”结构性消除
+- **比较实现**（`ui/local/features.js`）：`sortLevels(state)` 把 `sortOrder` 映射为 `{key,dir}` 层级数组；`compareWorks()` 逐级比较，`sign = dir==='asc' ? 1 : -1`，时间取 `sortTime || createTime`，保存状态取 `isDownloaded`；**status 为该维的最后一个层级时补同向时间次级键**（布尔二值比较在全同状态时否则无可见变化）；`filterAuthors()` 取 `sortLevels` 中首个 status 层级，按 `downloadStatus` 三档聚合（时间层级对作者一级列表无意义，保持关注顺序）
+- **生效链路**：改 `ui/html/my-collection.html`/`ui/css/my-collection.css`/`ui/local/*.js` 后需**重载扩展 → 重新点一次「选择文件夹」**（`offline-shell-generator.js` 全量覆盖并加 `?v=` 时间戳）→ 刷新离线页
 
 ---
 

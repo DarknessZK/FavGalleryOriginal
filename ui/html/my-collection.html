@@ -215,16 +215,18 @@
                     </div>
                     <!-- 分页条：从列表底部移到工具栏，位于「每页」与「排序」之间；仅作品视图显示 -->
                     <div class="pager" id="pager" style="display:none;"></div>
-                    <div class="sort-section">
+                    <div class="sort-section" title="时间・保存状态可叠加：先勾选的为主键，后勾选的为次级键；点方框=启用/停用，点文本或箭头=切换升/降序">
                         <span class="label">排序</span>
-                        <label class="sort-item">
-                            <input type="checkbox" id="sortByTime" checked> 时间
-                            <button class="sort-direction" id="dirTime" title="切换升/降序">↓</button>
-                        </label>
-                        <label class="sort-item">
-                            <input type="checkbox" id="sortByStatus"> 保存状态
-                            <button class="sort-direction" id="dirStatus" disabled title="切换升/降序">↓</button>
-                        </label>
+                        <span class="sort-item">
+                            <input type="checkbox" id="sortByTime" checked title="启用/停用时间排序">
+                            <span class="sort-text" id="sortTextTime">时间</span>
+                            <button class="sort-direction" id="dirTime">↓</button>
+                        </span>
+                        <span class="sort-item">
+                            <input type="checkbox" id="sortByStatus" title="启用/停用保存状态排序">
+                            <span class="sort-text" id="sortTextStatus">保存状态</span>
+                            <button class="sort-direction" id="dirStatus">↓</button>
+                        </span>
                     </div>
                 </div>
             </div>
@@ -232,8 +234,8 @@
             <!-- 列表类型 Tab -->
             <div class="tab-nav" id="tabNav">
                 <button class="tab-btn active" data-tab="liked">点赞<span class="tab-count" id="countLiked"></span></button>
-                <button class="tab-btn" data-tab="authors">作者<span class="tab-count" id="countAuthors"></span></button>
                 <button class="tab-btn" data-tab="bookmarked">收藏夹<span class="tab-count" id="countBookmarked"></span></button>
+                <button class="tab-btn" data-tab="authors">作者<span class="tab-count" id="countAuthors"></span></button>
             </div>
 
             <!-- Tab 内容 -->
@@ -244,15 +246,15 @@
                     <div class="load-more-hint" id="more-liked" style="display:none;"></div>
                     <div class="empty-state" id="empty-liked" style="display:none;">暂无点赞作品</div>
                 </div>
-                <!-- 作者（一级：作者列表；二级：单作者作品） -->
-                <div class="tab-pane" id="pane-authors">
-                    <div class="list" id="list-authors"></div>
-                    <div class="empty-state" id="empty-authors" style="display:none;">暂无作者</div>
-                </div>
                 <!-- 收藏夹（一级：收藏夹清单；二级：单收藏夹作品） -->
                 <div class="tab-pane" id="pane-bookmarked">
                     <div class="list" id="list-bookmarked"></div>
                     <div class="empty-state" id="empty-bookmarked" style="display:none;">暂无收藏夹</div>
+                </div>
+                <!-- 作者（一级：作者列表；二级：单作者作品） -->
+                <div class="tab-pane" id="pane-authors">
+                    <div class="list" id="list-authors"></div>
+                    <div class="empty-state" id="empty-authors" style="display:none;">暂无作者</div>
                 </div>
             </div>
         </div>

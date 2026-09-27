@@ -157,3 +157,14 @@ async function handleProbeOfflineLibrary() {
 }
 
 console.log('[Background] ✅ 监听器已设置（含离线页路径捕获）');
+
+// ==========================================
+// ✅ 错误边界（轻量）：仅 console 记录，不做恢复
+// background 为 classic service worker，无法 import error-boundary 模块
+// ==========================================
+self.addEventListener('error', (event) => {
+    console.error('[Background] ❌ 未捕获错误:', event.error || event.message);
+});
+self.addEventListener('unhandledrejection', (event) => {
+    console.error('[Background] ❌ 未处理 Promise rejection:', event.reason);
+});

@@ -106,10 +106,12 @@ function createAuthorCardHTML(author, selectedAuthorIds = null) {
                 <div style="font-size: 12px; color: #999; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" data-tip="${escapeHtml(signature)}">
                     ${escapeHtml(signature)}
                 </div>
-                <div style="font-size: 11px; color: #999;">
-                    👥 ${formatNumber(followerCount)} 粉丝 | 
-                    👤 ${formatNumber(followingCount)} 关注 | 
-                    🎬 已存<span class="author-saved-count">${author.downloadedCount || 0}/${formatNumber(workCount)}</span>作品<span class="author-tip-icon" data-tip="已保存作品数 / 作品总数。总数取自抖音关注列表接口，可能略少于作者主页实际作品数；完成下载后会以实际下载数量校正。" style="display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;margin-left:3px;border-radius:50%;border:1px solid #bbb;color:#999;font-size:10px;line-height:1;vertical-align:middle;flex-shrink:0;">?</span>
+                <div style="font-size: 11px; color: #999; display: flex; flex-wrap: wrap; align-items: center; column-gap: 5px;">
+                    <span style="white-space: nowrap;">👥${formatNumber(followerCount)}粉丝</span>
+                    <span style="color: #d9d9d9;">|</span>
+                    <span style="white-space: nowrap;">👤${formatNumber(followingCount)}关注</span>
+                    <span style="color: #d9d9d9;">|</span>
+                    <span style="white-space: nowrap;">🎬已存<span class="author-saved-count">${author.downloadedCount || 0}/${formatNumber(workCount)}</span><span class="author-tip-icon" data-tip="已保存作品数 / 作品总数。总数取自抖音关注列表接口，可能略少于作者主页实际作品数；完成下载后会以实际下载数量校正。" style="display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;margin-left:3px;border-radius:50%;border:1px solid #bbb;color:#999;font-size:10px;line-height:1;vertical-align:middle;flex-shrink:0;">?</span></span>
                 </div>
                 <div style="margin-top: 8px; display: flex; gap: 4px; align-items: center;">
                     ${authorUrl ? `
@@ -147,6 +149,20 @@ function createAuthorCardHTML(author, selectedAuthorIds = null) {
                             position: relative;
                             overflow: hidden;
                         ">${buttonText}</button>
+                    <button class="works-btn" data-uid="${uid}" title="查看 TA 的全部作品" style="
+                        padding: 4px 6px;
+                        width: 80px;
+                        background: #13c2c2;
+                        color: white;
+                        border: none;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-size: 12px;
+                        text-align: center;
+                        display: inline-block;
+                        white-space: nowrap;
+                        box-sizing: border-box;
+                    ">🎬 作品</button>
                 </div>
             </div>
         </div>

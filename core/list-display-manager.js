@@ -75,9 +75,12 @@ class ListDisplayManager {
 
         // 初始化 DOM 元素
         likedManager.initElements();
+
+        // ✅ 加载完成后填充「作者多选筛选」选项（按需显示）
+        this.app.eventBinder?.refreshAuthorFilterOptions('liked', likedManager);
         
         // ✅ 标记列表区域有数据，扩展到300px
-        const listSection = document.querySelector('.container > .section:nth-child(4)');
+        const listSection = document.getElementById('listSection');
         if (listSection && works.length > 0) {
             listSection.classList.add('has-data');
             logger.info('✅ 列表区域已标记为 has-data，扩展到300px');
@@ -142,8 +145,11 @@ class ListDisplayManager {
         // 初始化 DOM 元素
         bookmarkedManager.initElements();
 
+        // ✅ 加载完成后填充「作者多选筛选」选项（按需显示）
+        this.app.eventBinder?.refreshAuthorFilterOptions('bookmarked', bookmarkedManager);
+
         // ✅ 标记列表区域有数据，扩展到300px
-        const listSection = document.querySelector('.container > .section:nth-child(4)');
+        const listSection = document.getElementById('listSection');
         if (listSection && works.length > 0) {
             listSection.classList.add('has-data');
             logger.info('✅ 列表区域已标记为 has-data，扩展到300px');
@@ -400,7 +406,7 @@ class ListDisplayManager {
         }
         
         // ✅ 标记列表区域有数据，扩展到300px
-        const listSection = document.querySelector('.container > .section:nth-child(4)');
+        const listSection = document.getElementById('listSection');
         if (listSection && authors.length > 0) {
             listSection.classList.add('has-data');
             logger.info('✅ 列表区域已标记为 has-data，扩展到300px');
@@ -414,6 +420,10 @@ class ListDisplayManager {
 
         // 重置加载状态
         this.app.isLoading = false;
+
+        // ✅ 异步拉取实时下载计数校正「已存 x/y」（relations∩completed_works，
+        // 覆盖钻取/单卡保存不累加派生字段的场景），不阻塞首次渲染
+        this.app.authorDownloadManager?.requestAuthorStatuses(authors.map(a => a.uid));
 
         logger.info('✅ 关注列表渲染完成');
     }

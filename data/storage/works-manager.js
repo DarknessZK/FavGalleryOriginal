@@ -222,3 +222,87 @@ export async function loadBookmarkedWorks(fileSystem, collectId) {
         return { works: [], metadata: {}, collectId };
     }
 }
+
+/**
+ * ✅ 保存作者钻取作品列表（与 saveBookmarkedWorks 同构，收藏夹维度换成作者维度）
+ * 仅落 works 表元数据；work→author 关系由 data-fetcher._buildRelations 统一建立，
+ * 不碰 authors 表（避免覆盖关注列表的 downloadedCount/workCount 等派生字段）
+ *
+ * @param {Object} fileSystem - FileSystem 实例
+ * @param {Object} data - 作品数据 { works: [], uid: string }
+ */
+export async function saveAuthorWorks(fileSystem, data) {
+    await fileSystem.initDatabase();
+
+    const works = data.works || [];
+    const uid = data.uid;
+
+    if (!uid) {
+        throw new Error('缺少 uid 参数');
+    }
+
+    if (works.length === 0) {
+        logger.info('ℹ️ 作者作品为空，跳过保存');
+        return;
+    }
+
+    // 保存作品元数据到 works store
+    const worksToSave = works.map(work => {
+        const sanitizedWork = _sanitizeWorkForStorage(work);
+        return {
+            workId: work.workId,
+            ...sanitizedWork
+        };
+    });
+    await database.save('works', worksToSave);
+
+    logger.info(`💾 已保存 ${works.length} 个作者作品到 IndexedDB (作者: ${uid})`);
+
+    // 注意：备份由 backup-manager.js 统一处理，不在这里异步备份
+}
+
+/**
+ * ✅ 加载指定作者的钻取作品列表（关系驱动，与 loadBookmarkedWorks 同构）
+ *
+ * @param {Object} fileSystem - FileSystem 实例
+ * @param {string} uid - 作者UID
+ * @returns {Promise<Object>} { works: [], metadata: {}, uid }
+ */
+export async function loadAuthorWorks(fileSystem, uid) {
+    try {
+        await fileSystem.initDatabase();
+
+        if (!uid) {
+            return { works: [], metadata: {}, uid };
+        }
+
+        // 1. 从关系表获取该作者的所有作品ID（work→author）
+        const relations = await relationManager.getIncomingRelations('author', uid);
+
+        // ✅ 按写入时的递减时间戳排序，保持 API 返回的 新→旧 顺序
+        relations.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+        const workIds = relations
+            .filter(r => r.sourceType === 'work')
+            .map(r => r.sourceId);
+
+        if (workIds.length === 0) {
+            logger.info(`ℹ️ IndexedDB 中无作者 ${uid} 的作品关系`);
+            return { works: [], metadata: {}, uid };
+        }
+
+        // 2. 批量获取作品详情，按 workIds 顺序重排
+        const works = await database.getByIds('works', workIds);
+        const workMap = new Map(works.map(w => [w.workId, w]));
+        const sortedWorks = workIds
+            .map(id => workMap.get(id))
+            .filter(w => w !== undefined);
+
+        logger.info(`✅ 从 IndexedDB 加载作者 ${uid} 的 ${sortedWorks.length} 个作品`);
+
+        return { works: sortedWorks, metadata: {}, uid };
+    } catch (error) {
+        logger.error(`❌ 加载作者 ${uid} 的作品失败:`, error);
+        return { works: [], metadata: {}, uid };
+    }
+}

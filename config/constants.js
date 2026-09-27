@@ -192,8 +192,8 @@ export const CONFIG = {
      *      未来 UI 配置面板将读写此文件（含 backup 配置项）。
      */
     USER_CONFIG: {
-        /** 配置文件结构版本号，结构变更时递增，用于迁移兼容 */
-        version: 1
+        /** 配置文件结构版本号，结构变更时递增，用于迁移兼容（v2：新增 backup 段） */
+        version: 2
     },
     
     // ==========================================
@@ -257,6 +257,32 @@ export const CONFIG = {
                     progress: 'COLLECT_WORKS_PROGRESS',
                     error: 'COLLECT_WORKS_ERROR',
                     clear: 'CLEAR_BOOKMARKED_LIST',
+                    start: 'LOAD_DATA_START'
+                }
+            },
+            // ✅ 作者作品钻取（关注卡片「🎬 作品」按钮）：与 bookmarked 同构，
+            // 收藏夹维度换成作者维度，加载同时落 works 表并建立 work→author 关系
+            authorWorks: {
+                maxCount: 200,  // ✅ 与 BATCH_MAX_COUNT 口径一致（按作者获取的上限）
+                folderRequired: true,
+                skipIncrementalCheck: false,
+                saveKey: 'works',  // ✅ 保存时的字段名
+                resultKey: 'works',  // ✅ API返回的字段名
+                idField: 'workId',  // ✅ 主键字段名
+                relations: {
+                    groupType: 'author',
+                    groupId: null,  // 动态设置：uid（经 _buildRelations 的 targetIdFallback 兜底）
+                    // ✅ 关系构建配置（targetId 不来自条目字段，由调用方传 data.uid 兜底）
+                    sourceType: 'work',
+                    sourceField: 'workId',
+                    targetType: 'author',
+                    targetId: null
+                },
+                messages: {
+                    loaded: 'AUTHOR_WORKS_LOADED',
+                    progress: 'AUTHOR_WORKS_PROGRESS',
+                    error: 'AUTHOR_WORKS_ERROR',
+                    clear: null,
                     start: 'LOAD_DATA_START'
                 }
             },

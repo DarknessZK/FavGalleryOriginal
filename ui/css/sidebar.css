@@ -24,14 +24,15 @@ body {
     box-sizing: border-box;
 }
 
-/* ✅ 主要内容区域（除日志外的所有部分） */
+/* ✅ 主要内容区域（除列表/配置子界面外的所有部分）
+   —— 用 id 而非 nth-child 定位：新增 section 不会像位置选择器那样静默错位 */
 .container > .header,
-.container > .section:not(#logSection):not(:nth-child(4)) {
+.container > .section:not(#logSection):not(#listSection):not(#configView) {
     flex-shrink: 0;
 }
 
 /* ✅ 关注/点赞/收藏列表所在的 section - 自动扩展填充剩余空间 */
-.container > .section:nth-child(4) {
+#listSection {
     flex: 1; /* 自动扩展填充剩余空间 */
     display: flex;
     flex-direction: column;
@@ -40,7 +41,7 @@ body {
 }
 
 /* ✅ 列表区域有数据时扩展最小高度 */
-.container > .section:nth-child(4).has-data {
+#listSection.has-data {
     min-height: 800px;
 }
 
@@ -147,11 +148,6 @@ body {
     margin-bottom: 10px;
 }
 
-/* ✅ 排除列表区域的section，其他section不收缩 */
-.container > .section:not(:nth-child(4)) {
-    flex-shrink: 0;
-}
-
 .btn {
     width: 100%;
     padding: 10px;
@@ -175,6 +171,78 @@ body {
 .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+/* ✅ 自定义排序下拉（支持点击已选中项切换升/降序，箭头显示在选项上） */
+.sort-dropdown {
+    font-size: 12px;
+}
+
+.sort-dropdown-trigger {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    background: #fff;
+    color: #333;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.sort-dropdown-caret {
+    font-size: 10px;
+    color: #999;
+}
+
+.sort-dropdown-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    min-width: 100%;
+    background: #fff;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 100;
+    padding: 4px 0;
+}
+
+.sort-dropdown.open .sort-dropdown-menu {
+    display: block;
+}
+
+.sort-dropdown-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    color: #333;
+}
+
+.sort-dropdown-item:hover {
+    background: #f0f7ff;
+}
+
+.sort-dropdown-item.active {
+    color: #1890ff;
+    font-weight: 600;
+}
+
+.sort-dropdown-item .sort-dropdown-arrow {
+    font-size: 11px;
+}
+
+.sort-dropdown.is-disabled {
+    opacity: 0.5;
+    pointer-events: none;
 }
 
 .log-entry {
@@ -357,6 +425,25 @@ body {
 #bookmarkedList {
     flex: 1; /* 自动填充tab-content的剩余空间 */
     overflow-y: auto; /* 显示滚动条 */
+    margin-top: 10px;
+}
+
+/* ✅ 作者作品钻取子视图：纵向填充 tab-content，由内部列表独享滚动区（显示时 JS 设 display:flex） */
+#authorWorksView {
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+#authorWorksView > *:not(#authorWorksList) {
+    flex-shrink: 0;
+}
+
+#authorWorksList {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
     margin-top: 10px;
 }
 
@@ -667,4 +754,144 @@ body {
     height: 0 !important;
     padding: 0 !important;
     overflow: hidden !important;
+}
+
+/* ========================================== */
+/* ✅ 错误边界提示条 */
+/* ========================================== */
+
+.error-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    background: #fff2f0;
+    border: 1px solid #ffccc7;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #cf1322;
+    line-height: 1.5;
+    word-break: break-all;
+}
+
+.error-banner-close {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: #cf1322;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.error-banner-close:hover {
+    background: #ffccc7;
+}
+
+/* ========================================== */
+/* ✅ 界面配置子界面 */
+/* ========================================== */
+
+/* 配置子界面与列表区域同样填充剩余空间（两者互斥展示） */
+#configView {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    margin-bottom: 0;
+}
+
+/* 配置入口（存储位置标题行右侧，保持原折叠面板标题观感） */
+.cfg-entry {
+    font-size: 13px;
+    font-weight: normal;
+    color: #666;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.cfg-entry:hover {
+    color: #1890ff;
+}
+
+#configEntryArrow {
+    font-size: 11px;
+    color: #999;
+}
+
+/* 顶部提示条（默认加载中文案为警告色，成功后由 JS 切换为成功色） */
+.cfg-hint {
+    padding: 6px 10px;
+    background: #fff7e6;
+    border-left: 3px solid #faad14;
+    border-radius: 4px;
+    color: #d46b08;
+    margin-bottom: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+/* 全局悬浮提示（fixed 浮层，不受容器裁剪，入口拦截时提示用） */
+.cfg-toast {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10000;
+    padding: 8px 16px;
+    background: rgba(0, 0, 0, 0.78);
+    color: #fff;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.5;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.cfg-toast.visible {
+    opacity: 1;
+}
+
+.cfg-group-title {
+    margin: 10px 0 4px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #333;
+    border-bottom: 1px solid #f0f0f0;
+    padding-bottom: 2px;
+}
+
+.cfg-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.cfg-row label {
+    color: #666;
+    flex: 1;
+}
+
+.cfg-row input[type="number"] {
+    width: 90px;
+    padding: 3px 6px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.cfg-row input.cfg-invalid {
+    border-color: #ff4d4f;
+    background: #fff2f0;
 }

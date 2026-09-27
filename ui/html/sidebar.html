@@ -8,6 +8,12 @@
 </head>
 <body>
 <div class="container" id="sidebarContainer">
+    <!-- ✅ 错误边界提示条（默认隐藏，捕获未处理错误时显示） -->
+    <div id="errorBanner" class="error-banner" style="display: none;">
+        <span id="errorBannerText"></span>
+        <button id="errorBannerClose" class="error-banner-close" title="关闭">×</button>
+    </div>
+
     <!-- 头部 -->
     <div class="header">
         <h1>🎬 FavGallery</h1>
@@ -33,7 +39,11 @@
 
     <!-- 存储位置 -->
     <div class="section">
-        <div class="section-title">📁 存储位置</div>
+        <div class="section-title header-with-toggle">
+            <span>📁 存储位置</span>
+            <!-- ✅ 配置入口：点击切换配置子界面/原界面；未选文件夹时悬浮提示拦截 -->
+            <span id="openConfigView" class="cfg-entry">⚙️ 配置 <span id="configEntryArrow">▶</span></span>
+        </div>
         <button id="selectFolder" class="btn btn-primary">选择文件夹</button>
         <div id="folderStatus" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
 
@@ -47,18 +57,53 @@
         </div>
     </div>
 
+    <!-- ✅ 配置子界面（默认隐藏，与列表区域互斥展示；入口已校验文件夹，表单控件始终可用） -->
+    <div class="section" id="configView" style="display: none;">
+        <div id="configPanelHint" class="cfg-hint">
+            ⏳ 配置加载中...
+        </div>
+        <div id="configPanelForm">
+            <div class="cfg-group-title">列表加载上限（个，1 - 10000）</div>
+            <div class="cfg-row"><label>点赞作品</label><input type="number" id="cfgLikedMax" min="1" max="10000"></div>
+            <div class="cfg-row"><label>收藏作品</label><input type="number" id="cfgBookmarkedMax" min="1" max="10000"></div>
+            <div class="cfg-row"><label>关注作者</label><input type="number" id="cfgFollowingMax" min="1" max="10000"></div>
+            <div class="cfg-row"><label>收藏夹</label><input type="number" id="cfgCollectsMax" min="1" max="10000"></div>
+            <div class="cfg-row"><label>作者钻取</label><input type="number" id="cfgAuthorWorksMax" min="1" max="10000"></div>
+
+            <div class="cfg-group-title">定时备份</div>
+            <div class="cfg-row"><label>启用定时备份</label><input type="checkbox" id="cfgBackupEnabled"></div>
+            <div class="cfg-row"><label>备份间隔（分钟）</label><input type="number" id="cfgBackupInterval" min="1"></div>
+
+            <div class="cfg-group-title">列表加载备份</div>
+            <div class="cfg-row"><label>启用阶段性备份</label><input type="checkbox" id="cfgListBackupEnabled"></div>
+            <div class="cfg-row"><label>每 N 批备份一次</label><input type="number" id="cfgListBatchInterval" min="1"></div>
+
+            <div class="cfg-group-title">下载备份</div>
+            <div class="cfg-row"><label>启用混合策略备份</label><input type="checkbox" id="cfgDlBackupEnabled"></div>
+            <div class="cfg-row"><label>时间阈值（分钟）</label><input type="number" id="cfgDlTimeThreshold" min="1"></div>
+            <div class="cfg-row"><label>数量阈值（条）</label><input type="number" id="cfgDlCountThreshold" min="1"></div>
+            <div class="cfg-row"><label>启用立即备份</label><input type="checkbox" id="cfgImmediateBackupEnabled"></div>
+            <div class="cfg-row"><label>立即备份延迟（秒）</label><input type="number" id="cfgImmediateBackupDelay" min="1"></div>
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 12px;">
+            <button id="configSaveBtn" class="btn btn-primary" style="width: auto; padding: 6px 16px;">💾 保存</button>
+            <button id="configDefaultsBtn" class="btn" style="width: auto; padding: 6px 16px;" title="仅回填表单，需再点保存才会写入">恢复默认</button>
+            <button id="configCancelBtn" class="btn" style="width: auto; padding: 6px 16px;">取消</button>
+        </div>
+    </div>
+
     <!-- 关注列表 -->
-    <div class="section">
+    <div class="section" id="listSection">
 
         <!-- Tab 标签 -->
         <div style="display: flex; border-bottom: 2px solid #e8e8e8; margin-bottom: 10px;">
-            <button id="tabFollowing" class="tab-btn active">👥 关注列表</button>
-            <button id="tabLiked" class="tab-btn">❤️ 点赞列表</button>
+            <button id="tabLiked" class="tab-btn active">❤️ 点赞列表</button>
             <button id="tabBookmarked" class="tab-btn">⭐ 收藏列表</button>
+            <button id="tabFollowing" class="tab-btn">👥 关注列表</button>
         </div>
 
         <!-- 关注列表内容 -->
-        <div id="tabContentFollowing" class="tab-content">
+        <div id="tabContentFollowing" class="tab-content" style="display: none;">
             <button id="loadFollowing" class="btn btn-primary" disabled>刷新关注列表</button>
             <div id="followingStatus" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
 
@@ -91,17 +136,105 @@
             </div>
 
             <!-- 分页控件 -->
-            <div id="followingPagination" style="margin-top: 10px; text-align: center;">
-                <button id="followingPrevPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">上一页</button>
-                <span id="followingPageInfo" style="margin: 0 10px; font-size: 13px;">第 1 页</span>
-                <button id="followingNextPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">下一页</button>
+            <div id="followingPagination" style="margin-top: 10px; display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 4px;">
+                <button id="followingFirstPage" class="btn" style="width: auto; padding: 4px 8px; margin: 0; font-size: 12px; line-height: 1;" title="首页">首页</button>
+                <button id="followingPrevPage" class="btn" style="width: auto; padding: 4px 7px; margin: 0; font-size: 14px; line-height: 1;" title="上一页">‹</button>
+                <span id="followingPageInfo" style="margin: 0 2px; font-size: 12px; color: #666; white-space: nowrap;">第 1 页</span>
+                <button id="followingNextPage" class="btn" style="width: auto; padding: 4px 7px; margin: 0; font-size: 14px; line-height: 1;" title="下一页">›</button>
+                <button id="followingLastPage" class="btn" style="width: auto; padding: 4px 8px; margin: 0; font-size: 12px; line-height: 1;" title="末页">末页</button>
+                <span style="font-size: 12px; white-space: nowrap; margin-left: 2px;">跳至 <input id="followingJumpPage" type="number" min="1" style="width: 38px; padding: 2px 3px; margin: 0 2px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px;" title="输入页码，回车跳转">页</span>
             </div>
 
             <div id="followingList"></div>
+
+            <!-- ✅ 作者作品钻取子视图（默认隐藏，点作者卡片「🎬 作品」进入） -->
+            <div id="authorWorksView" style="display: none;">
+                <!-- 返回栏 -->
+                <div style="display: flex; gap: 8px; align-items: center; margin-top: 10px;">
+                    <button id="authorWorksBack" style="padding: 5px 12px; border: 1px solid #1890ff; background: #1890ff; color: #fff; font-weight: bold; border-radius: 4px; font-size: 12px; cursor: pointer; white-space: nowrap;">← 返回</button>
+                    <span id="authorWorksTitle" style="font-size: 13px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></span>
+                    <span id="authorWorksCount" style="font-size: 12px; color: #999; white-space: nowrap;"></span>
+                </div>
+
+                <div id="authorWorksStatus" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+
+                <!-- 搜索框 -->
+                <div style="margin-top: 10px;">
+                    <input
+                            type="text"
+                            id="authorWorksSearchInput"
+                            placeholder="搜索作品描述或作者..."
+                            style="width: 100%; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px;"
+                            disabled
+                    >
+                </div>
+
+                <!-- ✅ 高级筛选栏（第一行：重置 / 排序 / 时间；第二行：类型 / 状态，返回作者列表时随视图隐藏） -->
+                <div id="authorWorksFilterBar" style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
+                    <!-- 第一行 -->
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <button id="authorWorksFilterReset" disabled style="padding: 4px 10px; border: 1px solid #1890ff; background: #1890ff; color: #fff; border-radius: 4px; font-size: 12px; cursor: pointer; white-space: nowrap;">重置</button>
+                        <div class="sort-dropdown is-disabled" id="authorWorksFilterSort" title="排序" style="position: relative; flex: 0 0 auto;">
+                            <div class="sort-dropdown-trigger" id="authorWorksFilterSortTrigger">
+                                <span class="sort-dropdown-label">默认排序</span>
+                                <span class="sort-dropdown-caret">▾</span>
+                            </div>
+                            <div class="sort-dropdown-menu" id="authorWorksFilterSortMenu"></div>
+                        </div>
+                        <div style="display: flex; gap: 4px; align-items: center; flex: 1.6; min-width: 0;">
+                            <input type="date" id="authorWorksFilterFrom" disabled title="起始日期" style="flex: 1; min-width: 0; padding: 3px 4px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 11px;">
+                            <span style="font-size: 12px; color: #999;">~</span>
+                            <input type="date" id="authorWorksFilterTo" disabled title="结束日期" style="flex: 1; min-width: 0; padding: 3px 4px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 11px;">
+                        </div>
+                    </div>
+                    <!-- 第二行 -->
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <select id="authorWorksFilterType" disabled style="padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; flex: 1; min-width: 0;">
+                            <option value="all">类型：全部</option>
+                            <option value="video">视频</option>
+                            <option value="image">图集</option>
+                        </select>
+                        <select id="authorWorksFilterSaved" disabled style="padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; flex: 1; min-width: 0;">
+                            <option value="all">状态：全部</option>
+                            <option value="downloaded">已保存</option>
+                            <option value="notDownloaded">未保存</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- ✅ 批量操作栏（与点赞/收藏列表同规格） -->
+                <div id="authorWorksBatchActions" style="margin-top: 10px; padding: 8px; background: #f0f0f0; border-radius: 4px;">
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: nowrap;">
+                        <select id="authorWorksBatchSelect" style="padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; min-width: 100px;">
+                            <option value="">-- 批量选择 --</option>
+                            <option value="current">当前页作品</option>
+                            <option value="all">所有作品</option>
+                        </select>
+                        <button class="batch-download-btn btn btn-primary" style="width: auto; padding: 4px 8px; font-size: 12px; white-space: nowrap;" disabled data-type="authorWorks">
+                            ⬇️ 批量保存 (<span id="authorWorksSelectedCount" class="selected-count">0</span>)
+                        </button>
+                        <button class="stop-download-btn btn btn-primary" style="width: auto; padding: 4px 8px; font-size: 12px; white-space: nowrap;" disabled>
+                            ⏹️ 批量停止
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 分页控件 -->
+                <div id="authorWorksPagination" style="margin-top: 10px; display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 4px;">
+                    <button id="authorWorksFirstPage" class="btn" style="width: auto; padding: 4px 8px; margin: 0; font-size: 12px; line-height: 1;" title="首页">首页</button>
+                    <button id="authorWorksPrevPage" class="btn" style="width: auto; padding: 4px 7px; margin: 0; font-size: 14px; line-height: 1;" title="上一页">‹</button>
+                    <span id="authorWorksPageInfo" style="margin: 0 2px; font-size: 12px; color: #666; white-space: nowrap;">第 1 页</span>
+                    <button id="authorWorksNextPage" class="btn" style="width: auto; padding: 4px 7px; margin: 0; font-size: 14px; line-height: 1;" title="下一页">›</button>
+                    <button id="authorWorksLastPage" class="btn" style="width: auto; padding: 4px 8px; margin: 0; font-size: 12px; line-height: 1;" title="末页">末页</button>
+                    <span style="font-size: 12px; white-space: nowrap; margin-left: 2px;">跳至 <input id="authorWorksJumpPage" type="number" min="1" style="width: 38px; padding: 2px 3px; margin: 0 2px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px;" title="输入页码，回车跳转">页</span>
+                </div>
+
+                <div id="authorWorksList"></div>
+            </div>
         </div>
 
         <!-- 点赞列表内容 -->
-        <div id="tabContentLiked" class="tab-content" style="display: none;">
+        <div id="tabContentLiked" class="tab-content">
             <button id="loadLiked" class="btn btn-primary" disabled>刷新点赞列表</button>
             <div id="likedStatus" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
 
@@ -114,6 +247,62 @@
                         style="width: 100%; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px;"
                         disabled
                 >
+            </div>
+
+            <!-- ✅ 高级筛选栏（第一行：重置 / 排序 / 时间；第二行：类型 / 状态 / 作者筛选） -->
+            <div id="likedFilterBar" style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
+                <!-- 第一行 -->
+                <div style="display: flex; gap: 6px; align-items: center;">
+                    <button id="likedFilterReset" disabled style="padding: 4px 10px; border: 1px solid #1890ff; background: #1890ff; color: #fff; border-radius: 4px; font-size: 12px; cursor: pointer; white-space: nowrap;">重置</button>
+                    <div class="sort-dropdown is-disabled" id="likedFilterSort" title="排序" style="position: relative; flex: 0 0 auto;">
+                        <div class="sort-dropdown-trigger" id="likedFilterSortTrigger">
+                            <span class="sort-dropdown-label">默认排序</span>
+                            <span class="sort-dropdown-caret">▾</span>
+                        </div>
+                        <div class="sort-dropdown-menu" id="likedFilterSortMenu"></div>
+                    </div>
+                    <div style="display: flex; gap: 4px; align-items: center; flex: 1.6; min-width: 0;">
+                        <input type="date" id="likedFilterFrom" disabled title="起始日期" style="flex: 1; min-width: 0; padding: 3px 4px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 11px;">
+                        <span style="font-size: 12px; color: #999;">~</span>
+                        <input type="date" id="likedFilterTo" disabled title="结束日期" style="flex: 1; min-width: 0; padding: 3px 4px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 11px;">
+                    </div>
+                </div>
+                <!-- 第二行 -->
+                <div style="display: flex; gap: 6px; align-items: center;">
+                    <select id="likedFilterType" disabled style="padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; flex: 1; min-width: 0;">
+                        <option value="all">类型：全部</option>
+                        <option value="video">视频</option>
+                        <option value="image">图集</option>
+                    </select>
+                    <select id="likedFilterSaved" disabled style="padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; flex: 1; min-width: 0;">
+                        <option value="all">状态：全部</option>
+                        <option value="downloaded">已保存</option>
+                        <option value="notDownloaded">未保存</option>
+                    </select>
+                    <button id="likedAuthorFilterToggle" disabled style="display: none; padding: 4px 8px; border: 1px solid #d9d9d9; background: #fff; color: #666; border-radius: 4px; font-size: 12px; cursor: pointer; white-space: nowrap;">按作者筛选 ▾</button>
+                </div>
+            </div>
+
+            <!-- ✅ 作者多选筛选面板（由第一行“按作者筛选”按钮展开/收起） -->
+            <div id="likedAuthorFilter" style="display: none; margin-top: 6px;">
+                <div id="likedAuthorSelect" style="display: none; padding: 8px; background: #fafafa; border: 1px solid #e8e8e8; border-radius: 4px;">
+                    <div style="display: flex; gap: 10px;">
+                        <div style="display: flex; flex-direction: column; gap: 6px; min-width: 150px; position: relative;">
+                            <div id="likedAuthorDropdownTrigger" style="padding: 4px 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; cursor: pointer; background: #fff; user-select: none; display: flex; justify-content: space-between; align-items: center;">
+                                <span>+ 选择作者</span>
+                                <span style="font-size: 10px;">▼</span>
+                            </div>
+                            <div id="likedAuthorDropdownList" style="display: none; position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; background: #fff; border: 1px solid #d9d9d9; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); max-height: 200px; overflow-y: auto; z-index: 100;"></div>
+                            <div style="display: flex; gap: 4px;">
+                                <button id="likedAuthorSelectAll" style="flex: 1; padding: 3px 8px; border: 1px solid #1890ff; background: #fff; color: #1890ff; border-radius: 3px; font-size: 11px; cursor: pointer;">全选</button>
+                                <button id="likedAuthorClearAll" style="flex: 1; padding: 3px 8px; border: 1px solid #d9d9d9; background: #fff; color: #666; border-radius: 3px; font-size: 11px; cursor: pointer;">清空</button>
+                            </div>
+                        </div>
+                        <div style="flex: 1; position: relative; height: 60px;">
+                            <div id="likedAuthorTagsContainer" style="position: relative; height: 60px; padding: 6px; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff; display: flex; gap: 4px; flex-wrap: wrap; align-content: flex-start; overflow-y: auto; cursor: pointer; transition: all 0.2s ease;"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- ✅ 批量操作栏 -->
@@ -134,10 +323,13 @@
             </div>
 
             <!-- 分页控件 -->
-            <div id="likedPagination" style="margin-top: 10px; text-align: center;">
-                <button id="likedPrevPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">上一页</button>
-                <span id="likedPageInfo" style="margin: 0 10px; font-size: 13px;">第 1 页</span>
-                <button id="likedNextPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">下一页</button>
+            <div id="likedPagination" style="margin-top: 10px; display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 4px;">
+                <button id="likedFirstPage" class="btn" style="width: auto; padding: 4px 8px; margin: 0; font-size: 12px; line-height: 1;" title="首页">首页</button>
+                <button id="likedPrevPage" class="btn" style="width: auto; padding: 4px 7px; margin: 0; font-size: 14px; line-height: 1;" title="上一页">‹</button>
+                <span id="likedPageInfo" style="margin: 0 2px; font-size: 12px; color: #666; white-space: nowrap;">第 1 页</span>
+                <button id="likedNextPage" class="btn" style="width: auto; padding: 4px 7px; margin: 0; font-size: 14px; line-height: 1;" title="下一页">›</button>
+                <button id="likedLastPage" class="btn" style="width: auto; padding: 4px 8px; margin: 0; font-size: 12px; line-height: 1;" title="末页">末页</button>
+                <span style="font-size: 12px; white-space: nowrap; margin-left: 2px;">跳至 <input id="likedJumpPage" type="number" min="1" style="width: 38px; padding: 2px 3px; margin: 0 2px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px;" title="输入页码，回车跳转">页</span>
             </div>
 
             <div id="likedList"></div>
@@ -198,6 +390,62 @@
                 >
             </div>
 
+            <!-- ✅ 高级筛选栏（第一行：重置 / 排序 / 时间；第二行：类型 / 状态 / 作者筛选） -->
+            <div id="bookmarkedFilterBar" style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
+                <!-- 第一行 -->
+                <div style="display: flex; gap: 6px; align-items: center;">
+                    <button id="bookmarkedFilterReset" disabled style="padding: 4px 10px; border: 1px solid #1890ff; background: #1890ff; color: #fff; border-radius: 4px; font-size: 12px; cursor: pointer; white-space: nowrap;">重置</button>
+                    <div class="sort-dropdown is-disabled" id="bookmarkedFilterSort" title="排序" style="position: relative; flex: 0 0 auto;">
+                        <div class="sort-dropdown-trigger" id="bookmarkedFilterSortTrigger">
+                            <span class="sort-dropdown-label">默认排序</span>
+                            <span class="sort-dropdown-caret">▾</span>
+                        </div>
+                        <div class="sort-dropdown-menu" id="bookmarkedFilterSortMenu"></div>
+                    </div>
+                    <div style="display: flex; gap: 4px; align-items: center; flex: 1.6; min-width: 0;">
+                        <input type="date" id="bookmarkedFilterFrom" disabled title="起始日期" style="flex: 1; min-width: 0; padding: 3px 4px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 11px;">
+                        <span style="font-size: 12px; color: #999;">~</span>
+                        <input type="date" id="bookmarkedFilterTo" disabled title="结束日期" style="flex: 1; min-width: 0; padding: 3px 4px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 11px;">
+                    </div>
+                </div>
+                <!-- 第二行 -->
+                <div style="display: flex; gap: 6px; align-items: center;">
+                    <select id="bookmarkedFilterType" disabled style="padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; flex: 1; min-width: 0;">
+                        <option value="all">类型：全部</option>
+                        <option value="video">视频</option>
+                        <option value="image">图集</option>
+                    </select>
+                    <select id="bookmarkedFilterSaved" disabled style="padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; flex: 1; min-width: 0;">
+                        <option value="all">状态：全部</option>
+                        <option value="downloaded">已保存</option>
+                        <option value="notDownloaded">未保存</option>
+                    </select>
+                    <button id="bookmarkedAuthorFilterToggle" disabled style="display: none; padding: 4px 8px; border: 1px solid #d9d9d9; background: #fff; color: #666; border-radius: 4px; font-size: 12px; cursor: pointer; white-space: nowrap;">按作者筛选 ▾</button>
+                </div>
+            </div>
+
+            <!-- ✅ 作者多选筛选面板（由第一行“按作者筛选”按钮展开/收起） -->
+            <div id="bookmarkedAuthorFilter" style="display: none; margin-top: 6px;">
+                <div id="bookmarkedAuthorSelect" style="display: none; padding: 8px; background: #fafafa; border: 1px solid #e8e8e8; border-radius: 4px;">
+                    <div style="display: flex; gap: 10px;">
+                        <div style="display: flex; flex-direction: column; gap: 6px; min-width: 150px; position: relative;">
+                            <div id="bookmarkedAuthorDropdownTrigger" style="padding: 4px 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; cursor: pointer; background: #fff; user-select: none; display: flex; justify-content: space-between; align-items: center;">
+                                <span>+ 选择作者</span>
+                                <span style="font-size: 10px;">▼</span>
+                            </div>
+                            <div id="bookmarkedAuthorDropdownList" style="display: none; position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; background: #fff; border: 1px solid #d9d9d9; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); max-height: 200px; overflow-y: auto; z-index: 100;"></div>
+                            <div style="display: flex; gap: 4px;">
+                                <button id="bookmarkedAuthorSelectAll" style="flex: 1; padding: 3px 8px; border: 1px solid #1890ff; background: #fff; color: #1890ff; border-radius: 3px; font-size: 11px; cursor: pointer;">全选</button>
+                                <button id="bookmarkedAuthorClearAll" style="flex: 1; padding: 3px 8px; border: 1px solid #d9d9d9; background: #fff; color: #666; border-radius: 3px; font-size: 11px; cursor: pointer;">清空</button>
+                            </div>
+                        </div>
+                        <div style="flex: 1; position: relative; height: 60px;">
+                            <div id="bookmarkedAuthorTagsContainer" style="position: relative; height: 60px; padding: 6px; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff; display: flex; gap: 4px; flex-wrap: wrap; align-content: flex-start; overflow-y: auto; cursor: pointer; transition: all 0.2s ease;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- ✅ 批量操作栏 -->
             <div id="bookmarkedBatchActions" style="margin-top: 10px; padding: 8px; background: #f0f0f0; border-radius: 4px;">
                 <div style="display: flex; gap: 8px; align-items: center; flex-wrap: nowrap;">
@@ -216,10 +464,13 @@
             </div>
 
             <!-- 分页控件 -->
-            <div id="bookmarkedPagination" style="margin-top: 10px; text-align: center;">
-                <button id="bookmarkedPrevPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">上一页</button>
-                <span id="bookmarkedPageInfo" style="margin: 0 10px; font-size: 13px;">第 1 页</span>
-                <button id="bookmarkedNextPage" class="btn" style="width: auto; padding: 5px 10px; margin: 0 5px;">下一页</button>
+            <div id="bookmarkedPagination" style="margin-top: 10px; display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 4px;">
+                <button id="bookmarkedFirstPage" class="btn" style="width: auto; padding: 4px 8px; margin: 0; font-size: 12px; line-height: 1;" title="首页">首页</button>
+                <button id="bookmarkedPrevPage" class="btn" style="width: auto; padding: 4px 7px; margin: 0; font-size: 14px; line-height: 1;" title="上一页">‹</button>
+                <span id="bookmarkedPageInfo" style="margin: 0 2px; font-size: 12px; color: #666; white-space: nowrap;">第 1 页</span>
+                <button id="bookmarkedNextPage" class="btn" style="width: auto; padding: 4px 7px; margin: 0; font-size: 14px; line-height: 1;" title="下一页">›</button>
+                <button id="bookmarkedLastPage" class="btn" style="width: auto; padding: 4px 8px; margin: 0; font-size: 12px; line-height: 1;" title="末页">末页</button>
+                <span style="font-size: 12px; white-space: nowrap; margin-left: 2px;">跳至 <input id="bookmarkedJumpPage" type="number" min="1" style="width: 38px; padding: 2px 3px; margin: 0 2px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px;" title="输入页码，回车跳转">页</span>
             </div>
 
             <div id="bookmarkedList"></div>

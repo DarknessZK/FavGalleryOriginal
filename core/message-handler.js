@@ -161,6 +161,19 @@ class MessageHandler {
                 // ✅ UI 日志消息
                 case 'UI_LOG':
                     logToUI(event.data.level, event.data.message);
+                    // ✅ Content 侧转发的 error 级日志同步弹错误边界红条
+                    if (event.data.level === 'error') {
+                        this.app._showErrorBanner(event.data.message);
+                    }
+                    break;
+
+                // ✅ 配置面板：加载结果回填 / 保存结果
+                case 'USER_CONFIG_LOADED':
+                    this.app.configPanel.handleLoaded(event.data);
+                    break;
+
+                case 'SAVE_USER_CONFIG_RESULT':
+                    this.app.configPanel.handleSaveResult(event.data);
                     break;
                 
                 case 'BATCH_DOWNLOAD_PROGRESS':
@@ -188,7 +201,27 @@ class MessageHandler {
                 case 'AUTHOR_STATUS_RESPONSE':
                     // 由 AuthorDownloadManager 处理，这里不处理
                     break;
+
+                // ✅ 作者下载状态批量响应（实时计算校正「已存 x/y」，含钻取/单卡保存的下载）
+                case 'AUTHORS_STATUS_BATCH_RESPONSE':
+                    if (this.app.authorDownloadManager) {
+                        this.app.authorDownloadManager.applyAuthorStatuses(event.data.statuses);
+                    }
+                    break;
                 
+                // ✅ 作者作品钻取（API 实时拉取，按 uid 匹配当前目标，过期消息由视图内部丢弃）
+                case 'AUTHOR_WORKS_PROGRESS':
+                    this.app.authorWorksView.handleProgress(event.data);
+                    break;
+
+                case 'AUTHOR_WORKS_LOADED':
+                    this.app.authorWorksView.handleLoaded(event.data);
+                    break;
+
+                case 'AUTHOR_WORKS_ERROR':
+                    this.app.authorWorksView.handleError(event.data);
+                    break;
+
                 // ✅ 作者作品总数通知
                 case 'AUTHOR_WORKS_COUNT':
                     if (this.app.authorDownloadManager) {

@@ -57,6 +57,14 @@ export class UIStateManager {
             bookmarkedSearchInput.disabled = false;
             bookmarkedSearchInput.placeholder = '搜索作品描述或作者...';
         }
+
+        // ✅ 启用高级筛选栏（与搜索框同步）
+        ['liked', 'bookmarked'].forEach(prefix => {
+            ['FilterSaved', 'FilterFrom', 'FilterTo', 'FilterReset'].forEach(suffix => {
+                const el = document.getElementById(`${prefix}${suffix}`);
+                if (el) el.disabled = false;
+            });
+        });
         
         // ✅ 启用侧边栏模式切换开关
         const sidebarModeToggle = document.getElementById('sidebarModeToggle');
@@ -174,7 +182,8 @@ export class UIStateManager {
         const paginationButtonIds = [
             'likedPrevPage', 'likedNextPage',
             'bookmarkedPrevPage', 'bookmarkedNextPage',
-            'followingPrevPage', 'followingNextPage'
+            'followingPrevPage', 'followingNextPage',
+            'authorWorksPrevPage', 'authorWorksNextPage'
         ];
         
         paginationButtonIds.forEach(id => {
@@ -187,7 +196,15 @@ export class UIStateManager {
             }
         });
         
-        // ✅ 5. 禁用侧边栏模式切换开关（防止备份冲突）
+        // ✅ 5. 禁用高级筛选栏（防止下载中变更筛选导致状态混乱）
+        ['liked', 'bookmarked'].forEach(prefix => {
+            ['FilterSaved', 'FilterFrom', 'FilterTo', 'FilterReset'].forEach(suffix => {
+                const el = document.getElementById(`${prefix}${suffix}`);
+                if (el) el.disabled = true;
+            });
+        });
+
+        // ✅ 6. 禁用侧边栏模式切换开关（防止备份冲突）
         const sidebarModeToggle = document.getElementById('sidebarModeToggle');
         if (sidebarModeToggle) {
             sidebarModeToggle.classList.add('disabled');
@@ -244,24 +261,42 @@ export class UIStateManager {
             logToUI('success', `🔓 已恢复切换: ${enabledTabs.join('、')}`);
         }
         
-        // ✅ 3. 启用分页按钮
-        const paginationButtonIds = [
+        // ✅ 3. 恢复分页按钮可用态（强制 disabled=false 会越过各列表自己的分页边界，
+        //    导致钻取视图等单页列表按钮被误启用，点击后因 goToPage 守卫无效又立即置灰；
+        //    统一交回各 manager 的 updatePaginationControls 按真实数据状态恢复）
+        const paginationManagers = [
+            this.app.likedManager,
+            this.app.bookmarkedManager,
+            this.app.followingManager,
+            this.app.authorWorksView?.manager
+        ];
+        const paginationButtonIdsClearTitle = [
             'likedPrevPage', 'likedNextPage',
             'bookmarkedPrevPage', 'bookmarkedNextPage',
-            'followingPrevPage', 'followingNextPage'
+            'followingPrevPage', 'followingNextPage',
+            'authorWorksPrevPage', 'authorWorksNextPage'
         ];
-        
-        paginationButtonIds.forEach(id => {
-            const btn = document.getElementById(id);
-            if (btn) {
-                btn.disabled = false;
-                btn.style.opacity = '1';
-                btn.style.cursor = 'pointer';
-                btn.title = '';
+        paginationManagers.forEach(manager => {
+            try {
+                manager?.updatePaginationControls();
+            } catch (e) {
+                // 个别列表状态未就绪时忽略，其数据渲染完成后的 updateUI 会自行恢复按钮状态
             }
         });
+        paginationButtonIdsClearTitle.forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) btn.title = '';
+        });
         
-        // ✅ 4. 禁用停止下载按钮（下载已完成）
+        // ✅ 4. 启用高级筛选栏
+        ['liked', 'bookmarked'].forEach(prefix => {
+            ['FilterSaved', 'FilterFrom', 'FilterTo', 'FilterReset'].forEach(suffix => {
+                const el = document.getElementById(`${prefix}${suffix}`);
+                if (el) el.disabled = false;
+            });
+        });
+
+        // ✅ 5. 禁用停止下载按钮（下载已完成）
         document.querySelectorAll('.stop-download-btn').forEach(btn => {
             btn.disabled = true;
             btn.style.opacity = '0.5';
@@ -269,7 +304,7 @@ export class UIStateManager {
             btn.title = '';
         });
         
-        // ✅ 5. 启用侧边栏模式切换开关
+        // ✅ 6. 启用侧边栏模式切换开关
         const sidebarModeToggle = document.getElementById('sidebarModeToggle');
         if (sidebarModeToggle) {
             sidebarModeToggle.classList.remove('disabled');
