@@ -71,6 +71,33 @@ class DownloadHandler {
     }
 
     /**
+     * ✅ 作者作品钻取视图批量下载（与点赞/收藏同规格，作品都是真实 workId，直接复用批量管线）
+     * @param {Array} workIds - 作品ID数组
+     */
+    async handleAuthorWorksDownload(workIds) {
+        if (!workIds || workIds.length === 0) {
+            logger.warn('⚠️ 没有选择要下载的作品');
+            return;
+        }
+
+        // 设置状态（currentBatchListType='authorWorks' → 进度/完成消息落到 authorWorksStatus，
+        // 完成后自动清空 authorWorks 批量选择）
+        this.isDownloading = true;
+        this.currentBatchId = Date.now().toString();
+        this.currentBatchListType = 'authorWorks';
+
+        // 禁用按钮
+        this.app.uiStateManager.disableAllControlButtons();
+        this.app.uiStateManager.disableAllWorkDownloadButtons();
+
+        // ✅ 启用停止下载按钮
+        this.app.uiStateManager.enableStopDownloadButton();
+
+        // 调用核心下载逻辑
+        await this._executeBatchDownload(workIds, this.app.folderName, this.currentBatchId);
+    }
+
+    /**
      * ✅ 处理作者的批量下载（保存作者所有作品）
      * @param {Array} uids - 作者 UID 数组
      */
@@ -318,9 +345,12 @@ class DownloadHandler {
     async handleDownloadSuccess(data) {
         const { workId, result } = data;
     
-        // ✅ 根据当前激活的标签页选择对应的 Manager
+        // ✅ 定位目标 Manager：钻取下载优先用 authorWorksView 的 manager
+        //（钻取时 currentActiveTab 仍是 'following'，按 Tab 查找会落空）
         let targetManager;
-        if (this.app.currentActiveTab === 'liked') {
+        if (this.currentBatchListType === 'authorWorks') {
+            targetManager = this.app.authorWorksView?.manager;
+        } else if (this.app.currentActiveTab === 'liked') {
             targetManager = this.app.likedManager;
         } else if (this.app.currentActiveTab === 'bookmarked') {
             targetManager = this.app.bookmarkedManager;
@@ -375,9 +405,11 @@ class DownloadHandler {
     handleDownloadFailed(data) {
         const { workId, error } = data;
     
-        // ✅ 根据当前激活的标签页选择对应的 Manager
+        // ✅ 定位目标 Manager：钻取下载优先用 authorWorksView 的 manager（同 handleDownloadSuccess）
         let targetManager;
-        if (this.app.currentActiveTab === 'liked') {
+        if (this.currentBatchListType === 'authorWorks') {
+            targetManager = this.app.authorWorksView?.manager;
+        } else if (this.app.currentActiveTab === 'liked') {
             targetManager = this.app.likedManager;
         } else if (this.app.currentActiveTab === 'bookmarked') {
             targetManager = this.app.bookmarkedManager;

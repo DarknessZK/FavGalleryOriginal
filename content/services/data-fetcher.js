@@ -58,12 +58,15 @@ export class DataFetcher {
             const config = this.listConfigs[listType];
             
             // ✅ 配置驱动：根据 resultKey 确定消息字段
-            const messageData = {
-                [config.resultKey]: mergedData,
-                total: mergedData.length
-            };
-            
-            this._sendMessage(iframe, config.messages.loaded, messageData);
+            // iframe 为 null 时静默（调用方自行发消息，如作者钻取需要携带 uid 防串）
+            if (iframe && config.messages.loaded) {
+                const messageData = {
+                    [config.resultKey]: mergedData,
+                    total: mergedData.length
+                };
+                
+                this._sendMessage(iframe, config.messages.loaded, messageData);
+            }
         }
         
         // ✅ 结束列表加载，处理剩余批次备份
@@ -113,16 +116,9 @@ export class DataFetcher {
             logger.info(`   📋 原因: 缓存已有 ${cachedItems.length} 个，达到目标数量 ${config.maxCount}`);
             logger.info(`   ⚙️ 配置: skipIncrementalCheck=${config.skipIncrementalCheck}, folderRequired=${config.folderRequired}`);
             logger.info(`   💡 提示: 如需强制刷新，请清除缓存或重新选择文件夹`);
-            
-            // ✅ 发送加载完成消息到 Sidebar
-            if (iframe && config.messages.loaded) {
-                this._sendMessage(iframe, config.messages.loaded, {
-                    [config.resultKey]: cachedItems,
-                    total: cachedItems.length
-                });
-                logger.info(`📨 已发送 ${config.messages.loaded} 消息`);
-            }
-            
+
+            // ✅ 此处不发消息：统一由外层 _loadList 在拿到返回值后发送 loaded（单发点），
+            //    否则缓存已满命中本分支时会与外层重复发送 → 列表二次渲染、批量状态请求翻倍
             return cachedItems;
         }
         
@@ -221,7 +217,8 @@ export class DataFetcher {
             logger.info(`✅ 已保存最新列表: ${data.mergedData.length} 个${config.saveKey === 'collects' ? '收藏夹' : config.saveKey === 'authors' ? '作者' : '作品'}`);
             
             // 2. 建立关系（配置驱动）
-            await this._buildRelations(data.mergedData, config.relations, data.collectId);
+            // ✅ 第三参为动态 targetId 兜底值：收藏夹传 collectId，作者钻取传 uid
+            await this._buildRelations(data.mergedData, config.relations, data.collectId || data.uid);
             
             // 3. 触发备份（异步，不阻塞主流程）
             this.apiRequestCount++;  // ✅ 每次保存时计数+1
@@ -444,9 +441,9 @@ export class DataFetcher {
      * ✅ 通用关系构建方法（配置驱动）
      * @param {Array} data - 数据列表
      * @param {Object} relationsConfig - 关系配置
-     * @param {string} collectId - 收藏夹ID（可选，用于动态 targetId）
+     * @param {string} targetIdFallback - 动态 targetId 兜底值（收藏夹的 collectId / 作者钻取的 uid，可选）
      */
-    async _buildRelations(data, relationsConfig, collectId = null) {
+    async _buildRelations(data, relationsConfig, targetIdFallback = null) {
         if (!relationsConfig || !data || data.length === 0) {
             return;
         }
@@ -466,7 +463,11 @@ export class DataFetcher {
                 // 获取 targetId（优先使用配置的 targetId，其次使用动态字段）
                 let targetId = relationsConfig.targetId;
                 if (!targetId && relationsConfig.targetField) {
-                    targetId = item[relationsConfig.targetField] || collectId;
+                    targetId = item[relationsConfig.targetField] || targetIdFallback;
+                }
+                // ✅ 无 targetField 的配置（如 authorWorks：targetId=uid）直接用兜底值
+                if (!targetId) {
+                    targetId = targetIdFallback;
                 }
                 
                 // ✅ 只有 author_group 或 collect_group 且 targetId 为 null 时，才使用默认分组

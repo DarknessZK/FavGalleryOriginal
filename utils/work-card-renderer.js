@@ -29,6 +29,19 @@ function formatNumber(num) {
 }
 
 /**
+ * 格式化时间戳（毫秒）为 YYYY-MM-DD HH:MM:SS
+ * @param {number|string} ms
+ * @returns {string} 无有效时间时返回空串
+ */
+function formatDate(ms) {
+    if (!ms) return '';
+    const d = new Date(Number(ms));
+    if (isNaN(d.getTime())) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/**
  * 生成作品卡片 HTML
  * @param {Object} work - 作品数据对象
  * @param {Set} selectedWorkIds - 选中的作品ID集合（可选）
@@ -50,6 +63,9 @@ function createWorkCardHTML(work, selectedWorkIds = null) {
 
     // 跳转链接（优先使用缓存的 video.pageUrl，否则动态拼接）
     const workUrl = work.video?.pageUrl || `https://www.douyin.com/video/${workId}`;
+
+    // ✅ 展示时间（与排序/筛选取值一致：sortTime || createTime）
+    const workDate = formatDate(work.sortTime || work.createTime);
 
     // 检查是否已下载
     const isDownloaded = work.isDownloaded === true;
@@ -85,7 +101,7 @@ function createWorkCardHTML(work, selectedWorkIds = null) {
                 <div style="font-size: 12px; color: #999;">
                     ${isImagePost ? `🖼️ 图集 (${imageCount}张)` : `⏱️ ${Math.floor(duration / 1000)}秒`} | 
                     ${playCount > 0 ? `▶️ ${formatNumber(playCount)} | ` : ''}
-                    ❤️ ${formatNumber(likeCount)}
+                    ❤️ ${formatNumber(likeCount)}${workDate ? ` | 🕒 ${workDate}` : ''}
                 </div>
                 <div style="margin-top: 8px; display: flex; gap: 4px; align-items: center;">
                     <a href="${workUrl}" target="_blank" class="jump-btn" data-work-id="${workId}" style="

@@ -59,6 +59,27 @@ export class ListConfigFactory {
                     })
                 };
 
+            // ✅ 作者作品钻取：与 bookmarked 同构，collectId 维度换成 uid/platformId 维度
+            case 'authorWorks':
+                return {
+                    ...baseConfig,
+                    apiFetch: async (params) => {
+                        // getAuthorWorksForList 返回数组，包装成 resultKey 结构供配置化管线消费
+                        const works = await platformAPI.getAuthorWorksForList(
+                            params.platformId,
+                            params.maxCount,
+                            params.onProgress
+                        );
+                        return { works };
+                    },
+                    cacheLoad: (fs, extraParams) => worksManager.loadAuthorWorks(fs, extraParams.uid),
+                    cacheSave: (fs, data) => worksManager.saveAuthorWorks(fs, {
+                        works: data.works,
+                        uid: data.uid,
+                        metadata: data.metadata
+                    })
+                };
+
             case 'following':
                 return {
                     ...baseConfig,

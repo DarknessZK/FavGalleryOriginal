@@ -4,7 +4,6 @@
 // ==========================================
 
 import { createLogger } from '../utils/logger.js';
-import { database } from '../data/database/database.js';
 
 const logger = createLogger('AuthorDownloadManager');
 
@@ -158,6 +157,80 @@ export class AuthorDownloadManager {
             text-align: center;
         `;
         button.appendChild(textSpan);
+    }
+
+    /**
+     * ✅ 批量请求作者实时下载状态（fire-and-forget，响应由 applyAuthorStatuses 处理）
+     * 统一「已存 x/y」口径：relations ∩ completed_works 实时计算，
+     * 覆盖钻取视图/单卡保存不走按作者下载累加链路的场景
+     * @param {Array<string>} uids - 作者ID列表
+     */
+    requestAuthorStatuses(uids) {
+        if (!uids || uids.length === 0) return;
+        window.parent.postMessage({
+            source: 'sidebar',
+            type: 'QUERY_AUTHORS_STATUS_BATCH',
+            uids
+        }, '*');
+    }
+
+    /**
+     * ✅ 持久化作者下载统计到 Content 主库（fire-and-forget 消息桥接）
+     * 关键：Sidebar 上下文的 IndexedDB 按 origin 隔离，直写 database.save('authors') 只落影子库，
+     * 刷新关注列表（读 Content 库）永远看不到；必须经 UPDATE_AUTHOR_DOWNLOAD_STATS 委托 Content 合并写主库
+     * @param {Object} stats - { uid: { downloadedCount, workCount } }
+     */
+    _persistAuthorStatsToContent(stats) {
+        if (!stats || Object.keys(stats).length === 0) return;
+        window.parent.postMessage({
+            source: 'sidebar',
+            type: 'UPDATE_AUTHOR_DOWNLOAD_STATS',
+            stats
+        }, '*');
+    }
+
+    /**
+     * ✅ 应用批量实时状态：回写内存作者数据 + 重渲染 + 持久化校正派生字段
+     * 仅覆盖有关系数据的作者；workCount 取 max(原 API 值, 关系数)，
+     * 避免部分关系（如未拉满）时把总数缩小造成误报
+     * @param {Object} statuses - { uid: { downloadedCount, workCount } }
+     */
+    async applyAuthorStatuses(statuses = {}) {
+        const followingManager = this.app.followingManager;
+        if (!followingManager || !statuses) return;
+
+        const changedAuthors = [];
+        (followingManager.allAuthors || []).forEach(author => {
+            const status = statuses[author.uid];
+            if (!status) return;
+
+            const downloadedCount = status.downloadedCount || 0;
+            const workCount = Math.max(author.workCount || 0, status.workCount || 0);
+            if (author.downloadedCount === downloadedCount && author.workCount === workCount) return;
+
+            author.downloadedCount = downloadedCount;
+            author.workCount = workCount;
+            changedAuthors.push(author);
+        });
+
+        if (changedAuthors.length === 0) return;
+
+        // ✅ 重渲染作者列表（保持当前页 checkbox 选中态，避免计数校正造成选择丢失）
+        const selectedSet = this.app.batchSelectionManager?.state?.following?.selectedAuthorIds || new Set();
+        const currentPageItems = followingManager.getCurrentPageData();
+        const selectedIds = currentPageItems
+            .filter(author => selectedSet.has(author.uid))
+            .map(author => author.uid);
+        followingManager.initElements();
+        followingManager.updateUI(new Set(selectedIds));
+
+        // ✅ 持久化校正后的派生字段到 Content 主库（下次刷新关注列表时 _mergeItems 以此为缓存基准）
+        this._persistAuthorStatsToContent(changedAuthors.reduce((acc, author) => {
+            acc[author.uid] = { downloadedCount: author.downloadedCount, workCount: author.workCount };
+            return acc;
+        }, {}));
+
+        logger.info(`[AuthorDownload] 📊 已按实时计算校正 ${changedAuthors.length} 个作者的下载计数`);
     }
 
     /**
@@ -370,14 +443,12 @@ export class AuthorDownloadManager {
             }
             
             // ✅ 同步更新内存中的作者数据（如果存在 followingManager）
-            let fullAuthor = null;
             if (this.app.followingManager && this.app.followingManager.allAuthors) {
                 const authorIndex = this.app.followingManager.allAuthors.findIndex(a => a.uid === uid);
                 
                 if (authorIndex !== -1) {
                     this.app.followingManager.allAuthors[authorIndex].downloadedCount = downloadedCount;
                     this.app.followingManager.allAuthors[authorIndex].workCount = authorData.workCount;
-                    fullAuthor = this.app.followingManager.allAuthors[authorIndex];
                     
                     logger.info(`[AuthorDownload] ✅ 已同步更新内存中的作者数据: ${uid}`);
                     
@@ -394,30 +465,11 @@ export class AuthorDownloadManager {
             
             // ✅ 同步刷新卡片统计行“🎬 已存 X/Y 作品”（与按钮独立，需单独更新）
             this.updateAuthorSavedCount(uid, downloadedCount, authorData.workCount);
-            
-            // ✅ 持久化到数据库（save = upsert，传入完整对象）
-            // 优先使用内存中的完整作者对象；关注列表未加载时回退到数据库已有记录合并
-            if (!fullAuthor) {
-                try {
-                    const existing = await database.get('authors', uid);
-                    fullAuthor = existing
-                        ? { ...existing, downloadedCount, workCount }
-                        : { uid, downloadedCount, workCount };
-                } catch (error) {
-                    logger.warn(`[AuthorDownload] ⚠️ 读取数据库作者记录失败，跳过持久化: ${uid}`, error.message);
-                }
-            }
-            
-            if (fullAuthor) {
-                try {
-                    await database.save('authors', fullAuthor);
-                    logger.info(`[AuthorDownload] 💾 已持久化作者数据到数据库: ${uid}`, {
-                        downloadedCount, workCount: authorData.workCount
-                    });
-                } catch (error) {
-                    logger.error(`[AuthorDownload] ❌ 持久化作者数据失败:`, error);
-                }
-            }
+
+            // ✅ 持久化到 Content 主库（消息桥接；旧实现直写 Sidebar 影子库，刷新后必丢）
+            this._persistAuthorStatsToContent({
+                [uid]: { downloadedCount, workCount: authorData.workCount }
+            });
         } catch (error) {
             logger.error('[AuthorDownload] ❌ 更新作者状态失败:', error);
         } finally {

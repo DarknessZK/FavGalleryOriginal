@@ -1,6 +1,6 @@
 # FavGallery 配置系统设计文档
 
-> **定位**：本文档描述 FavGallery 的用户配置系统——包括**已实现**的 `.FavGallery/config.json` 配置文件方案，以及**规划中**的界面配置面板（用于可视化调整 backup 等配置项）。
+> **定位**：本文档描述 FavGallery 的用户配置系统——包括 `.FavGallery/config.json` 配置文件方案（v2，含 backup 段）与**已实现**的界面配置面板（Sidebar 可视化读写）。
 >
 > **状态图例**：✅ 已实现　🔜 规划中（尚未落地）
 
@@ -24,16 +24,27 @@
 - **格式**：JSON，2 空格缩进
 - **生成时机**：用户首次"选择文件夹"后自动生成；已存在则读取
 
-### 2.2 当前结构
+### 2.2 当前结构（version 2）✅
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "listMaxCount": {
     "liked": 120,
     "bookmarked": 60,
     "following": 60,
     "collects": 100
+  },
+  "backup": {
+    "interval": 600000,
+    "enabled": false,
+    "listBackup": { "batchInterval": 5, "enabled": true },
+    "downloadBackup": {
+      "timeThreshold": 60000,
+      "countThreshold": 10,
+      "enabled": true,
+      "immediateBackup": { "enabled": true, "delay": 5000 }
+    }
   }
 }
 ```
@@ -46,8 +57,19 @@
 | `listMaxCount.bookmarked` | number | 收藏夹作品加载上限 |
 | `listMaxCount.following` | number | 关注作者加载上限 |
 | `listMaxCount.collects` | number | 收藏夹列表加载上限 |
+| `backup.interval` | number | 定时备份间隔（毫秒） |
+| `backup.enabled` | boolean | 是否启用定时备份 |
+| `backup.listBackup.batchInterval` | number | 列表备份每 N 批执行一次 |
+| `backup.listBackup.enabled` | boolean | 是否启用列表阶段性备份 |
+| `backup.downloadBackup.timeThreshold` | number | 下载备份时间阈值（毫秒） |
+| `backup.downloadBackup.countThreshold` | number | 下载备份数量阈值（条） |
+| `backup.downloadBackup.enabled` | boolean | 是否启用下载备份 |
+| `backup.downloadBackup.immediateBackup.enabled` | boolean | 是否启用立即备份 |
+| `backup.downloadBackup.immediateBackup.delay` | number | 立即备份延迟（毫秒） |
 
-> **说明**：`listMaxCount` 的默认值与 `LIST_CONFIGS[*].maxCount` 一致，由代码在生成时派生，不在文档中重复维护具体数值。
+> **说明**：`listMaxCount` 默认值由 `LIST_CONFIGS[*].maxCount` 派生、`backup` 段默认值由 `BACKUP_CONFIG` 派生（单一数据源），具体数值以 `config/constants.js` 为准，不在文档中重复维护。
+>
+> **v1 → v2 迁移**：无需迁移脚本。旧 v1 文件缺失的 `backup` 段由 `_mergeWithDefault` 逐层深合并自动补默认，首次加载后即视为 v2（保存或重写盘后 `version` 变为 2）。
 
 ---
 
@@ -87,9 +109,11 @@ userConfig.ensureConfig(fileSystem)
         │       ├─ 存在 → JSON.parse
         │       └─ 不存在/损坏 → buildDefault()（从 LIST_CONFIGS 派生）→ writeUserConfig()
         │
-        ├─ _mergeWithDefault()          // 深合并，补齐缺失字段（向前兼容）
+        ├─ _mergeWithDefault()          // 逐层深合并，补齐缺失字段（向前兼容，含 backup 段）
         │
-        └─ _applyToListConfigs()        // 把 maxCount 写回 CONFIG.FETCH_CONFIG.LIST_CONFIGS
+        ├─ _applyToListConfigs()        // 把 maxCount 写回 CONFIG.FETCH_CONFIG.LIST_CONFIGS
+        │
+        └─ _applyToBackupConfig()       // 把 backup 段写回 CONFIG.BACKUP_CONFIG（合法值覆盖，非法保留默认）
         │
         ▼
 dataFetcher.reloadConfigs()             // 用最新 CONFIG 重建 listConfigs 快照
@@ -123,59 +147,48 @@ Sidebar 发起加载时不再携带 `maxCount`，Content Script 的 `extraParams
 | 配置文件 JSON 损坏 | `readUserConfig` 返回 `null`，回退到默认配置，记录 warn 日志 |
 | 缺失部分字段 | `_mergeWithDefault` 深合并补齐（如旧文件无 `collects`） |
 | `maxCount` 非法（非正数/非数字） | 忽略该项，保留默认值，记录 warn 日志 |
+| `backup` 段非法值（非正数/非布尔） | `_applyToBackupConfig` 拒绝写回，保留运行时当前值，记录 warn 日志 |
+| 面板提交非法值 | 前端校验标红拒绝提交；Content 侧 `_sanitizeAgainst` 回退到运行时当前值（双重防线） |
+| 保存写盘失败 | `userConfig.save()` 抛错 → `SAVE_USER_CONFIG_RESULT {success:false}` → 面板提示 + 错误红条，运行时配置不变 |
 | 未知列表类型键 | 忽略，记录 warn 日志 |
 | 写入配置文件失败 | 不阻断主流程，本次运行仍使用内存中的配置，记录 warn 日志 |
 
 ---
 
-## 五、规划中：界面配置面板 🔜
+## 五、界面配置面板 ✅
 
-> **本节为设计规划，尚未实现。** 目的是让用户在 Sidebar 界面直接调整配置，无需手动编辑 JSON。
+> **已实现**。用户在 Sidebar 界面直接调整配置，无需手动编辑 JSON。
 
-### 5.1 目标
+### 5.1 入口与布局
 
-在 Sidebar 增加一个"配置"入口（面板/弹窗），可视化读写 `.FavGallery/config.json`。
+侧边栏「存储位置」下方的「⚙️ 配置」可折叠区（默认收起），由 `core/config-panel.js` 驱动，包含：
 
-### 5.2 首个纳入的配置项：backup 🔜
+- **列表加载上限**：点赞/收藏作品/关注/收藏夹 4 个数字输入（1 ~ 10000）
+- **备份**：启用定时备份、备份间隔（分钟）
+- **列表备份**：启用、每 N 批备份一次
+- **下载备份**：启用、时间阈值（分钟）、数量阈值（条）；立即备份：启用、延迟（秒）
+- **保存 / 恢复默认** 按钮与顶部提示条
 
-当前 `BACKUP_CONFIG`（定时备份间隔、阶段性备份批次、下载备份阈值、立即备份延迟等）仍是 `constants.js` 中的静态常量，**暂不写入配置文件**。规划将其纳入配置面板，允许用户调整，例如：
+> **单位约定**：面板用人类友好单位（分钟/秒），保存时换算回毫秒落盘；回填时逆向换算。
 
-| 配置项 | 含义 | 当前默认（constants.js） |
-|--------|------|--------------------------|
-| `backup.interval` | 定时备份间隔 | 10 分钟 |
-| `backup.enabled` | 是否启用定时备份 | false |
-| `backup.listBackup.batchInterval` | 每 N 批备份一次 | 5 |
-| `backup.downloadBackup.timeThreshold` | 下载备份时间阈值 | 1 分钟 |
-| `backup.downloadBackup.countThreshold` | 下载备份数量阈值 | 10 条 |
-| `backup.downloadBackup.immediateBackup.delay` | 立即备份延迟 | 5 秒 |
+### 5.2 纳入的配置项（backup 段全部字段 + listMaxCount）
 
-### 5.3 面板交互设计要点（草案）
+`backup` 段已迁入 config.json（v2），默认值从 `constants.js` 的 `BACKUP_CONFIG` 派生，运行时由 `_applyToBackupConfig()` 写回内存单例，字段含义见 2.2 表格。尚未纳入：download 文件名格式等其他可配置项。
 
-1. **读写通道**：面板在 Sidebar 侧，但文件读写在 Content Script 侧。需新增一对消息：
-   - `GET_USER_CONFIG`：Sidebar → Content Script，请求当前配置
-   - `SAVE_USER_CONFIG`：Sidebar → Content Script，提交修改后的配置
-2. **保存后生效**：Content Script 收到 `SAVE_USER_CONFIG` 后 `writeUserConfig()` → `ensureConfig()`（或直接应用）→ `reloadConfigs()`，无需重选文件夹即时生效。
-3. **校验**：数值项做范围校验（如 `maxCount > 0`、`interval` 下限），非法输入拒绝保存并提示。
-4. **版本迁移**：保存时写入当前 `USER_CONFIG.VERSION`；加载时若版本落后，执行迁移补齐。
+### 5.3 读写通道与交互细节
 
-### 5.4 配置文件结构演进（示意）
+1. **读写通道**（面板在 Sidebar 侧，文件读写在 Content Script 侧）：
+   - `GET_USER_CONFIG` → Content 回 `USER_CONFIG_LOADED {success, config, defaults}`；未选文件夹时回 `{success:false, error:'请先选择文件夹'}`，面板控件禁用并提示
+   - `SAVE_USER_CONFIG`（携编辑后的 config）→ Content 回 `SAVE_USER_CONFIG_RESULT {success, config|error}`
+2. **首次展开发起拉取**；「恢复默认」仅按 GET 响应里的 `defaults` 回填表单，**不直接保存**，点「保存」才写盘。
+3. **保存链路**：`userConfig.save(fileSystem, patchConfig)` = 与当前配置深合并 → `_sanitizeAgainst` 校验（非法回退运行时当前值）→ `writeUserConfig()` → 重新 apply（LIST_CONFIGS + BACKUP_CONFIG）→ 回包生效配置。
+4. **保存后生效**：Content 侧 `dataFetcher.reloadConfigs()` 重建列表配置快照；定时备份同步启停对齐（`backup.enabled=true` → `startPeriodicBackup()`，false → `stopPeriodicBackup()`，两方法均幂等，interval 变更重起生效）。
+5. **校验**：前端非法输入标红拒绝提交；失败时复用错误边界（红条 + 日志）。成功后按 RESULT 回填并提示。
+6. **版本迁移**：保存时写入当前 `USER_CONFIG.version`；加载时靠 `_mergeWithDefault` 深合并自动补齐缺失段。
 
-纳入 backup 后，配置文件将扩展为：
+### 5.4 已知边界：定时备份启动时序
 
-```json
-{
-  "version": 2,
-  "listMaxCount": { "liked": 120, "bookmarked": 60, "following": 60, "collects": 100 },
-  "backup": {
-    "interval": 600000,
-    "enabled": false,
-    "listBackup": { "batchInterval": 5, "enabled": true },
-    "downloadBackup": { "timeThreshold": 60000, "countThreshold": 10, "enabled": true }
-  }
-}
-```
-
-> 演进时通过 `version` 字段 + `_mergeWithDefault` 的深合并策略保证旧文件平滑升级。
+`file-system.init()` 里定时备份的启动判定发生在 `ensureConfig()` **之前**：选择文件夹后的本次首启按静态默认（`enabled:false`）判定；在配置面板保存启用后备份会立即补偿启动（5.3 第 4 步），下次选同一文件夹时即按配置文件驱动。
 
 ---
 
@@ -185,9 +198,10 @@ Sidebar 发起加载时不再携带 `maxCount`，Content Script 的 `extraParams
 
 1. 在 `user-config.js` 的 `buildDefault()` 中从对应常量派生默认字段。
 2. 在 `_mergeWithDefault()` 中补充该字段的合并逻辑（嵌套对象需深合并）。
-3. 在 `_applyToListConfigs()`（或新增 `_applyToXxx()`）中把值写回目标常量。
+3. 在 `_applyToListConfigs()` / `_applyToBackupConfig()`（或新增 `_applyToXxx()`）中把值写回目标常量。
 4. 若写回的常量在 `listConfigs` 构造时被固化，确保 `reloadConfigs()` 覆盖到。
-5. 更新本文档第二、五节的结构说明，并递增 `USER_CONFIG.VERSION`（若结构不兼容）。
+5. 在 `core/config-panel.js` 的 `FIELD_SPECS` 中增加字段映射（含单位换算与校验范围），并在 `ui/html/sidebar.html` 面板加控件。
+6. 更新本文档第二、五节的结构说明，并递增 `USER_CONFIG.version`（若结构不兼容）。
 
 ---
 
@@ -195,13 +209,16 @@ Sidebar 发起加载时不再携带 `maxCount`，Content Script 的 `extraParams
 
 | 功能 | 文件 |
 |------|------|
-| 路径/版本常量 | `config/constants.js` → `FILE_SYSTEM.CONFIG_FILE`、`USER_CONFIG.VERSION` |
-| 配置管理器 | `config/user-config.js` → `userConfig`（`ensureConfig` / `buildDefault` / `getMaxCount`） |
+| 路径/版本常量 | `config/constants.js` → `FILE_SYSTEM.CONFIG_FILE`、`USER_CONFIG.version` |
+| 配置管理器 | `config/user-config.js` → `userConfig`（`ensureConfig` / `buildDefault` / `save` / `getMaxCount` / `_applyToBackupConfig`） |
 | 文件读写 | `data/storage/file-system.js` → `readUserConfig` / `writeUserConfig` |
 | 配置重建 | `content/services/data-fetcher.js` → `reloadConfigs` |
 | 编排入口 | `content/main.js` → `selectFolder` |
+| 消息通道 | `content/main.js` → `GET_USER_CONFIG` / `SAVE_USER_CONFIG` 处理；`core/message-handler.js` → `USER_CONFIG_LOADED` / `SAVE_USER_CONFIG_RESULT` 分支 |
+| 面板 UI | `core/config-panel.js` + `ui/html/sidebar.html`（配置折叠区）+ `ui/css/sidebar.css`（`.cfg-*`） |
+| 备份启停对齐 | `data/backup/backup-manager.js` → `startPeriodicBackup` / `stopPeriodicBackup` |
 
 ---
 
-**最后更新**：2026-09-14
+**最后更新**：2026-09-26
 **维护者**：FavGallery 开发团队

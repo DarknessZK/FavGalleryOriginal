@@ -20,23 +20,46 @@
         };
     }
 
-    /** 作品排序比较（时间 / 保存状态） */
+    /**
+     * 生效的排序层级：state.sortOrder（已启用维度，按勾选顺序）配 state.sortDirs（各维度升/降）
+     * @returns {Array} 主键在前的层级数组；空数组 = 不排序
+     */
+    function sortLevels(state) {
+        const order = Array.isArray(state.sortOrder) ? state.sortOrder : [];
+        return order.map(function (k) {
+            return { key: k, dir: state.sortDirs && state.sortDirs[k] === 'asc' ? 'asc' : 'desc' };
+        });
+    }
+
+    /**
+     * 作品排序比较：按已启用维度的顺序逐级比较（先选中的为主键，后选中的作次级键）
+     * 时间：sortTime || createTime；保存状态：isDownloaded
+     * 无启用维度 → 不排序（稳定 sort 保留生成顺序）
+     * 末级为保存状态时补一个同向时间次级键：全为同一状态时升/降切换仍有可见且确定的顺序
+     */
     function compareWorks(a, b, state) {
-        if (state.sortKey === 'status') {
-            const av = a.isDownloaded ? 1 : 0;
-            const bv = b.isDownloaded ? 1 : 0;
-            return state.sortDir === 'asc' ? av - bv : bv - av;
+        const levels = sortLevels(state);
+        const timeOf = function (w) { return w.sortTime || w.createTime || 0; };
+        for (let i = 0; i < levels.length; i++) {
+            const lv = levels[i];
+            const sign = lv.dir === 'asc' ? 1 : -1;
+            const d = lv.key === 'status'
+                ? (a.isDownloaded ? 1 : 0) - (b.isDownloaded ? 1 : 0)
+                : timeOf(a) - timeOf(b);
+            if (d !== 0) return sign * d;
+            // ✅ 保存状态为该维的最后一个层级（后面没有显式层级可继续区分）时才用时间兜底
+            if (lv.key === 'status' && i === levels.length - 1) {
+                const dt = timeOf(a) - timeOf(b);
+                if (dt !== 0) return sign * dt;
+            }
         }
-        // 默认按时间：点赞/收藏时间优先，其次发布时间
-        const at = a.sortTime || a.createTime || 0;
-        const bt = b.sortTime || b.createTime || 0;
-        return state.sortDir === 'asc' ? at - bt : bt - at;
+        return 0;
     }
 
     /**
      * 对作品数组应用 筛选 + 搜索 + 排序（返回新数组，不修改原数组）
      * @param {Array} works
-     * @param {Object} state - { filter, keyword, sortKey, sortDir }
+     * @param {Object} state - { filter, keyword, sortOrder, sortDirs, dateFrom, dateTo }
      */
     function applyFilterSortSearch(works, state) {
         if (!Array.isArray(works)) return [];
@@ -99,15 +122,20 @@
             });
         }
 
-        if (state.sortKey === 'status') {
+        // 保存状态维度（排序栈中的首个 status 层级）：按下载完成度聚合
+        let statusLv = null;
+        sortLevels(state).forEach(function (lv) {
+            if (lv.key === 'status' && !statusLv) statusLv = lv;
+        });
+        if (statusLv) {
             const rank = { completed: 0, partial: 1, pending: 2 };
             arr.sort(function (a, b) {
                 const ra = rank[a.downloadStatus] !== undefined ? rank[a.downloadStatus] : 3;
                 const rb = rank[b.downloadStatus] !== undefined ? rank[b.downloadStatus] : 3;
-                return state.sortDir === 'asc' ? rb - ra : ra - rb;
+                return statusLv.dir === 'asc' ? rb - ra : ra - rb;
             });
         }
-        // 时间排序对作者无意义，保持生成时的关注顺序
+        // 时间层级对作者一级列表无意义，保持生成时的关注顺序
         return arr;
     }
 

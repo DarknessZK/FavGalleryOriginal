@@ -1,29 +1,29 @@
 // ==========================================
 // FavGallery - Content Script 主模块
-// 职责：注入侧边栏到页面，处理与 UI 的消息通信
+// 职责：消息路由分发 + 主流程协调（文件夹选择/备份恢复/批量下载/用户信息）
+// 已拆出：侧边栏注入 → services/sidebar-injector.js，收藏夹作品加载 → services/collect-works-loader.js
 // ==========================================
 
 import { createLogger } from '../utils/logger.js';
 import { fileSystem } from '../data/storage/file-system.js';
 import { dataFetcher } from './services/data-fetcher.js';
+import { SidebarInjector } from './services/sidebar-injector.js';
+import { collectWorksLoader } from './services/collect-works-loader.js';
+import { authorWorksLoader } from './services/author-works-loader.js';
 import { AuthorDownloadService } from './services/author-download-service.js';
-import { SingleDownloader } from '../download/single-downloader.js';
-import { backupManager } from '../data/backup/backup-manager.js';
 import { database } from '../data/database/database.js';
-import * as relationManager from '../data/database/relation-manager.js';
 import { platformAPI } from '../api/platform-adapter.js';
 import { CONFIG } from '../config/constants.js';
 import { userConfig } from '../config/user-config.js';
 import { generateOfflineData } from '../data/export/offline-data-generator.js';
 import { generateStaticShell } from '../data/export/offline-shell-generator.js';
+import { installErrorBoundary } from '../utils/error-boundary.js';
 import fileLogger from '../utils/file-logger.js';
 
 const logger = createLogger('ContentScript');
 
 class ContentScript {
     constructor() {
-        this.isCollapsed = false;
-        this.injected = false;
         
         // ✅ 批量下载状态管理
         this.currentBatchManager = null;  // 当前批量下载管理器实例
@@ -53,167 +53,24 @@ class ContentScript {
         // ✅ 通知 FileLogger 已选择文件夹（Content Script 环境）
         fileLogger.setFolderSelected(true);
         
-        // 注入侧边栏
-        this.injectSidebar();
+        // ✅ 注入侧边栏（DOM 创建/展开收起/显示模式由 SidebarInjector 负责）
+        this.injector = new SidebarInjector({
+            sidebarUrl: this.sidebarUrl,
+            onIframeLoad: (iframe) => this.sendUserInfo(iframe)
+        });
+        this._injectSidebar();
     }
 
     /**
-     * 注入侧边栏到页面
+     * 注入侧边栏并挂载消息监听（DOM 创建/展开收起/显示模式已拆至 services/sidebar-injector.js）
      */
-    async injectSidebar() {
-        if (this.injected) {
-            logger.warn('侧边栏已注入，跳过');
-            return;
-        }
+    async _injectSidebar() {
+        await this.injector.inject();
         
-        logger.info('开始注入侧边栏...');
-        
-        // ✅ 读取用户设置的侧边栏模式
-        this.sidebarMode = await this.loadSidebarMode();
-        logger.info(`📋 侧边栏模式: ${this.sidebarMode}`);
-        
-        // ✅ 通过 platformAPI 判断当前是否为主页（跨平台架构）
-        const isHomePage = platformAPI.isHomePage();
-        this.isCollapsed = !isHomePage;
-        
-        if (this.isCollapsed) {
-            logger.info('📍 当前非主页，侧边栏将以收起状态注入');
-        } else {
-            logger.info('📍 当前是主页，侧边栏将以展开状态注入');
-        }
-        
-        // 创建容器
-        const container = document.createElement('aside');
-        container.id = 'favgallery-sidebar';
-        
-        const sidebarConfig = CONFIG.UI_CONFIG.SIDEBAR;
-        const initialWidth = this.isCollapsed ? `${sidebarConfig.COLLAPSED_WIDTH}px` : `${sidebarConfig.WIDTH}px`;
-        
-        // ✅ 使用配置的样式
-        const containerStyles = {
-            ...sidebarConfig.CONTAINER_STYLES,
-            width: initialWidth,
-            zIndex: sidebarConfig.Z_INDEX,
-            transition: `all ${sidebarConfig.TRANSITION_DURATION}s ease`
-        };
-        container.style.cssText = Object.entries(containerStyles)
-            .map(([key, value]) => `${key.replace(/[A-Z]/g, m => '-' + m.toLowerCase())}: ${value}`)
-            .join('; ');
-        
-        // 创建 iframe
-        const iframe = document.createElement('iframe');
-        iframe.src = this.sidebarUrl;
-        
-        const iframeStyles = {
-            ...sidebarConfig.IFRAME_STYLES,
-            width: initialWidth
-        };
-        iframe.style.cssText = Object.entries(iframeStyles)
-            .map(([key, value]) => `${key.replace(/[A-Z]/g, m => '-' + m.toLowerCase())}: ${value}`)
-            .join('; ');
-        
-        // 创建切换按钮
-        const toggleBtn = document.createElement('button');
-        toggleBtn.id = 'sidebar-toggle-btn';
-        
-        const btnLeft = this.isCollapsed ? `${sidebarConfig.COLLAPSED_WIDTH}px` : `${sidebarConfig.WIDTH}px`;
-        const btnIcon = this.isCollapsed ? '▶' : '◀';
-        const btnTitle = this.isCollapsed ? '展开侧边栏' : '收起侧边栏';
-        
-        toggleBtn.innerHTML = btnIcon;
-        
-        // ✅ 使用配置的样式
-        const toggleBtnStyles = {
-            ...sidebarConfig.TOGGLE_BUTTON_STYLES,
-            left: btnLeft,
-            zIndex: sidebarConfig.TOGGLE_BTN_Z_INDEX,
-            transition: `all ${sidebarConfig.TRANSITION_DURATION}s`
-        };
-        toggleBtn.style.cssText = Object.entries(toggleBtnStyles)
-            .map(([key, value]) => `${key.replace(/[A-Z]/g, m => '-' + m.toLowerCase())}: ${value}`)
-            .join('; ');
-        toggleBtn.title = btnTitle;
-        
-        // 添加到页面
-        container.appendChild(iframe);
-        document.body.appendChild(container);
-        document.body.appendChild(toggleBtn);
-        
-        // 绑定切换事件
-        toggleBtn.addEventListener('click', () => {
-            this.toggleSidebar(iframe, container, toggleBtn);
-        });
-        
-        // ✅ 根据模式调整页面布局（挤压模式才调整）
-        if (this.sidebarMode === 'squeeze') {
-            const root = document.querySelector('#root');
-            if (root) {
-                root.style.marginLeft = initialWidth;
-                root.style.transition = `margin-left ${sidebarConfig.TRANSITION_DURATION}s`;
-            }
-        }
-        
-        this.injected = true;
-        this.iframe = iframe;
-        this.container = container;
-        this.toggleBtn = toggleBtn;
-        
-        logger.info('✅ 侧边栏已注入');
-        
-        // 监听来自 iframe 的消息
+        // 监听来自 iframe 的消息（时机与原实现一致：注入完成后注册）
         window.addEventListener('message', (event) => {
-            this.handleMessage(event, iframe);
+            this.handleMessage(event, this.injector.iframe);
         });
-        
-        // iframe 加载完成后发送用户信息
-        iframe.addEventListener('load', () => {
-            setTimeout(async () => {
-                await this.sendUserInfo(iframe);
-            }, sidebarConfig.IFRAME_LOAD_DELAY);
-        });
-    }
-
-    /**
-     * 切换侧边栏展开/收起状态
-     */
-    toggleSidebar(iframe, container, toggleBtn) {
-        const root = document.querySelector('#root');
-
-        if (!container || !toggleBtn) return;
-
-        this.isCollapsed = !this.isCollapsed;
-        
-        const sidebarConfig = CONFIG.UI_CONFIG.SIDEBAR;
-        const expandedWidth = `${sidebarConfig.WIDTH}px`;
-        const collapsedWidth = `${sidebarConfig.COLLAPSED_WIDTH}px`;
-
-        if (this.isCollapsed) {
-            iframe.style.width = collapsedWidth;
-            container.style.width = collapsedWidth;
-            toggleBtn.style.left = collapsedWidth;
-            toggleBtn.innerHTML = '▶';
-            toggleBtn.title = '展开侧边栏';
-            
-            // ✅ 挤压模式才调整页面布局
-            if (this.sidebarMode === 'squeeze' && root) {
-                root.style.marginLeft = collapsedWidth;
-            }
-            
-            logger.info('✅ 侧边栏已收起');
-        } else {
-            iframe.style.width = expandedWidth;
-            container.style.width = expandedWidth;
-            toggleBtn.style.left = expandedWidth;
-            toggleBtn.innerHTML = '◀';
-            toggleBtn.title = '收起侧边栏';
-            
-            // ✅ 挤压模式才调整页面布局
-            if (this.sidebarMode === 'squeeze' && root) {
-                root.style.marginLeft = expandedWidth;
-            }
-            
-            logger.info('✅ 侧边栏已展开');
-        }
     }
 
     /**
@@ -228,8 +85,9 @@ class ContentScript {
                 break;
                 
             case 'SELECT_FOLDER':
-                // 重选文件夹 = 数据源变化，收藏夹作品会话缓存作废
-                this._collectWorksCache = null;
+                // 重选文件夹 = 数据源变化，收藏夹作品与作者钻取作品的会话缓存均作废
+                collectWorksLoader.invalidateCache();
+                authorWorksLoader.invalidateCache();
                 this.selectFolder(iframe);
                 break;
                 
@@ -274,6 +132,9 @@ class ContentScript {
             // ✅ 处理加载关注作者列表请求
             case 'LOAD_FOLLOWING_AUTHORS':
                 logger.info('👥 收到加载关注列表请求');
+                // ✅ 刷新关注列表 = 作者维度数据更新入口：作者钻取作品会话缓存作废（新代数），
+                // 与 collectWorksLoader 由「刷新收藏列表」驱动代数的机制同构
+                authorWorksLoader.invalidateCache();
                 dataFetcher.setFolderSelected(true);
                 await dataFetcher._loadList('following', iframe, {});
                 break;
@@ -281,7 +142,14 @@ class ContentScript {
             // ✅ 处理加载收藏夹作品请求
             case 'LOAD_COLLECT_WORKS':
                 logger.info(`🎬 收到加载收藏夹作品请求: ${event.data.collectIds.length} 个收藏夹`);
-                await this._handleLoadCollectWorks(event.data, iframe);
+                await collectWorksLoader.load(event.data, iframe);
+                break;
+            
+            // ✅ 处理作者作品钻取拉取请求（关注卡片「作品」按钮，与收藏夹加载同构：
+            // 会话代数缓存 + data-fetcher 配置化管线，落 works 表并建立 work→author 关系）
+            case 'LOAD_AUTHOR_WORKS':
+                logger.info(`🎬 收到作者作品拉取请求: UID=${event.data.uid}`);
+                await authorWorksLoader.load(event.data, iframe);
                 break;
             
             // ✅ 处理 Sidebar 日志批量发送
@@ -297,17 +165,41 @@ class ContentScript {
                 logger.info(`📊 收到查询作者状态请求: UID=${event.data.uid}`);
                 await this.handleQueryAuthorStatus(event.data, iframe);
                 break;
+
+            // ✅ 批量查询作者下载状态（关注列表渲染后的实时计数校正）
+            case 'QUERY_AUTHORS_STATUS_BATCH':
+                logger.info(`📊 收到批量查询作者状态请求: ${event.data.uids?.length || 0} 个作者`);
+                await this.handleQueryAuthorsStatusBatch(event.data, iframe);
+                break;
+
+            // ✅ 持久化作者下载统计到 Content 主库（Sidebar/Content 的 IndexedDB 按 origin 隔离，
+            // Sidebar 直写只对影子库生效，必须经本消息桥接）
+            case 'UPDATE_AUTHOR_DOWNLOAD_STATS':
+                logger.info(`💾 收到作者下载统计写入请求: ${Object.keys(event.data.stats || {}).length} 个作者`);
+                await this.handleUpdateAuthorDownloadStats(event.data, iframe);
+                break;
             
             // ✅ 处理侧边栏模式切换
             case 'CHANGE_SIDEBAR_MODE':
                 logger.info(`🔄 收到侧边栏模式切换请求: ${event.data.mode}`);
-                await this.handleChangeSidebarMode(event.data, iframe);
+                await this.injector.changeMode(event.data.mode);
                 break;
             
             // ✅ 处理获取侧边栏模式请求
             case 'GET_SIDEBAR_MODE':
                 logger.info('📋 收到获取侧边栏模式请求');
                 await this.handleGetSidebarMode(iframe);
+                break;
+
+            // ✅ 配置面板：读取用户配置
+            case 'GET_USER_CONFIG':
+                this._handleGetUserConfig(iframe);
+                break;
+
+            // ✅ 配置面板：保存用户配置
+            case 'SAVE_USER_CONFIG':
+                logger.info('💾 收到保存用户配置请求');
+                await this._handleSaveUserConfig(event.data.config, iframe);
                 break;
                 
             default:
@@ -343,151 +235,13 @@ class ContentScript {
     async _handleLoadCollectsList(iframe) {
         // ✅ 刷新收藏列表 = 显式更新入口：作废收藏夹作品会话缓存（新代数），
         // 本次刷新后首次勾选的收藏夹会完整重走加载；同代数内取消再勾选仍直接复用
-        this._collectWorksCache = null;
+        collectWorksLoader.invalidateCache();
         logger.info('🔄 刷新收藏列表，收藏夹作品会话缓存已作废');
         // ✅ 统一处理：收藏夹也需要文件夹（folderRequired: true）
         dataFetcher.setFolderSelected(true);
         await dataFetcher._loadList('collects', iframe, { 
             count: CONFIG.FETCH_CONFIG.LIST_CONFIGS.collects.maxCount 
         });
-    }
-
-    /**
-     * ✅ 处理加载收藏夹作品（串行入口）
-     * 加载中收到新的勾选请求时不并发执行，只记录最新一次请求，
-     * 待当前循环完成后按最新收藏夹集合重跑。
-     * 并发会导致：同一收藏夹缓存被两个循环同时读写、
-     * 两组 COLLECT_WORKS_PROGRESS/LOADED 消息交错覆盖状态栏与列表
-     */
-    async _handleLoadCollectWorks(data, iframe) {
-        if (this._collectWorksLoading) {
-            this._collectWorksPending = data;
-            logger.info('⏳ 收藏夹作品正在加载中，记录最新勾选请求，完成后将按最新集合重跑');
-            return;
-        }
-        this._collectWorksLoading = true;
-        try {
-            await this._doLoadCollectWorks(data, iframe);
-            // 加载期间选择有变化 → 用最后一次的最新集合重跑（多轮快速勾选只保留最后一条）
-            while (this._collectWorksPending) {
-                const next = this._collectWorksPending;
-                this._collectWorksPending = null;
-                logger.info('🔁 按加载期间更新后的收藏夹选择重新处理');
-                await this._doLoadCollectWorks(next, iframe);
-            }
-        } finally {
-            this._collectWorksLoading = false;
-        }
-    }
-
-    /**
-     * ✅ 收藏夹作品加载实际执行体
-     */
-    async _doLoadCollectWorks(data, iframe) {
-        try {
-            const { collectIds } = data;
-            const allWorksMap = new Map();
-            // ✅ 会话级收藏夹作品缓存（collectId → works），代数由「刷新收藏列表」按钮驱动：
-            // - 已加载过的收藏夹再次勾选 → 静默复用（不走 API、不重放进度，取消勾选不影响）
-            // - 点击刷新按钮（_handleLoadCollectsList）或重选文件夹时整个作废，之后首次勾选重新加载
-            if (!this._collectWorksCache) this._collectWorksCache = new Map();
-            
-            // ✅ 先获取所有收藏夹的元数据（包含名称）
-            const collectsMetadata = {};
-            try {
-                const { loadAllCollects } = await import('../data/storage/collects-manager.js');
-                const result = await loadAllCollects(fileSystem);
-                const allCollects = result.collects || [];
-                
-                // 构建 collectId -> collectName 映射
-                allCollects.forEach(collect => {
-                    collectsMetadata[collect.collectId] = collect.collectName;
-                });
-                logger.info(`📚 已加载 ${Object.keys(collectsMetadata).length} 个收藏夹元数据`);
-            } catch (error) {
-                logger.warn('⚠️ 加载收藏夹元数据失败:', error.message);
-            }
-            
-            for (let i = 0; i < collectIds.length; i++) {
-                const collectId = collectIds[i];
-                const collectName = collectsMetadata[collectId] || `收藏夹${collectId.substring(0, 8)}`;
-
-                // ✅ 会话内已加载过（本次刷新代数内）：跳过重复加载，也不发进度消息
-                const cachedWorks = this._collectWorksCache.get(collectId);
-                if (cachedWorks) {
-                    cachedWorks.forEach(work => allWorksMap.set(work.workId, work));
-                    logger.info(`⚡ 本次刷新周期内已加载过，直接复用: ${collectName} (${cachedWorks.length} 个作品)`);
-                    continue;
-                }
-                
-                // ✅ 发送开始加载消息（带收藏夹名称）
-                iframe.contentWindow.postMessage({
-                    source: 'content',
-                    type: 'COLLECT_WORKS_PROGRESS',
-                    collectId,
-                    collectName,
-                    current: 0,
-                    total: 0,
-                    index: i + 1,
-                    totalCollects: collectIds.length
-                }, '*');
-                
-                logger.info(`📂 正在加载收藏夹 ${i + 1}/${collectIds.length}: ${collectName} (${collectId})`);
-                
-                try {
-                    // forceRefresh：会话缓存未命中 = 本次刷新代数内首次勾选，
-                    // 强制走 API 增量拉取，绕过 data-fetcher 的文件缓存短路（缓存满额就直接返旧数据）
-                    const works = await dataFetcher._loadList('bookmarked', iframe, { 
-                        collectId,
-                        maxCount: CONFIG.FETCH_CONFIG.LIST_CONFIGS.bookmarked.maxCount,
-                        forceRefresh: true
-                    });
-                    
-                    if (works && works.length > 0) {
-                        works.forEach(work => {
-                            allWorksMap.set(work.workId, work);
-                        });
-                        // ✅ 写入会话缓存：同一刷新代数内持续有效，刷新收藏列表/重选文件夹时作废
-                        this._collectWorksCache.set(collectId, works);
-                        
-                        // ✅ 发送进度更新消息
-                        iframe.contentWindow.postMessage({
-                            source: 'content',
-                            type: 'COLLECT_WORKS_PROGRESS',
-                            collectId,
-                            collectName,
-                            current: works.length,
-                            total: works.length,
-                            index: i + 1,
-                            totalCollects: collectIds.length
-                        }, '*');
-                        
-                        logger.info(`✅ 收藏夹 ${collectName} 加载完成: ${works.length} 个作品，累计 ${allWorksMap.size} 个（去重后）`);
-                    }
-                } catch (error) {
-                    logger.error(`❌ 获取收藏夹 ${collectName} 的作品失败:`, error.message);
-                }
-            }
-            
-            const mergedWorks = Array.from(allWorksMap.values());
-            logger.info(`✅ 总共获取 ${mergedWorks.length} 个作品（去重后）`);
-            
-            iframe.contentWindow.postMessage({
-                source: 'content',
-                type: 'COLLECT_WORKS_LOADED',
-                works: mergedWorks,
-                total: mergedWorks.length,
-                collectIds: collectIds
-            }, '*');
-        } catch (error) {
-            logger.error('❌ 加载收藏夹作品失败:', error);
-            
-            iframe.contentWindow.postMessage({
-                source: 'content',
-                type: 'COLLECT_WORKS_ERROR',
-                error: error.message
-            }, '*');
-        }
     }
 
     /**
@@ -997,84 +751,120 @@ class ContentScript {
     }
     
     /**
-     * ✅ 加载侧边栏模式设置
-     * @returns {Promise<string>} 'hover' | 'squeeze'
+     * ✅ 处理批量查询作者下载状态（relations ∩ completed_works 实时计算）
+     * 供侧边栏统一作者卡片「已存 x/y」口径：不依赖仅由按作者下载链路累加的派生字段
      */
-    async loadSidebarMode() {
+    async handleQueryAuthorsStatusBatch(data, iframe) {
+        const { uids } = data;
+
         try {
-            const { getSetting } = await import('../data/storage/settings-manager.js');
-            const mode = await getSetting('sidebar_mode', 'hover');
-            return mode;
+            const { getAuthorsDownloadStatusBatch } = await import('../data/storage/authors-manager.js');
+            const statuses = await getAuthorsDownloadStatusBatch(fileSystem, uids || []);
+
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'AUTHORS_STATUS_BATCH_RESPONSE',
+                statuses
+            }, '*');
         } catch (error) {
-            logger.warn('⚠️ 加载侧边栏模式失败，使用默认值 hover:', error.message);
-            return 'hover';
+            logger.error('❌ 批量查询作者状态失败:', error);
+            iframe.contentWindow.postMessage({
+                source: 'content',
+                type: 'AUTHORS_STATUS_BATCH_RESPONSE',
+                statuses: {}
+            }, '*');
         }
     }
-    
+
     /**
-     * ✅ 处理侧边栏模式切换
+     * ✅ 处理作者下载统计持久化请求（合并写 Content 主库 authors 表）
      */
-    async handleChangeSidebarMode(data, iframe) {
-        const { mode } = data;
-        
+    async handleUpdateAuthorDownloadStats(data, iframe) {
         try {
-            logger.info(`🔄 切换侧边栏模式: ${this.sidebarMode} -> ${mode}`);
-            
-            // 保存设置
-            const { setSetting } = await import('../data/storage/settings-manager.js');
-            await setSetting('sidebar_mode', mode);
-            
-            // 更新内存中的模式
-            this.sidebarMode = mode;
-            
-            // ✅ 重新应用布局
-            const root = document.querySelector('#root');
-            const sidebarConfig = CONFIG.UI_CONFIG.SIDEBAR;
-            const currentWidth = this.isCollapsed ? `${sidebarConfig.COLLAPSED_WIDTH}px` : `${sidebarConfig.WIDTH}px`;
-            
-            if (mode === 'squeeze') {
-                // 挤压模式：调整页面布局
-                if (root) {
-                    root.style.marginLeft = currentWidth;
-                }
-            } else {
-                // 悬停模式：移除页面布局调整
-                if (root) {
-                    root.style.marginLeft = '0';
-                }
-            }
-            
-            logger.info(`✅ 侧边栏模式已切换为: ${mode}`);
+            const { updateAuthorsDownloadStats } = await import('../data/storage/authors-manager.js');
+            await updateAuthorsDownloadStats(fileSystem, data.stats || {});
         } catch (error) {
-            logger.error('❌ 切换侧边栏模式失败:', error);
+            logger.error('❌ 持久化作者下载统计失败:', error);
         }
     }
-    
+
     /**
-     * ✅ 处理获取侧边栏模式请求
+     * ✅ 处理获取侧边栏模式请求（模式读取/存储已拆至 SidebarInjector，兼容默认值由其内部兜底）
      */
     async handleGetSidebarMode(iframe) {
+        const mode = await this.injector.getMode();
+        
+        logger.info(`📋 返回侧边栏模式: ${mode}`);
+        
+        // 发送响应到 Sidebar
+        iframe.contentWindow.postMessage({
+            source: 'content',
+            type: 'SIDEBAR_MODE_RESPONSE',
+            mode: mode
+        }, '*');
+    }
+
+    /**
+     * ✅ 配置面板：响应 GET_USER_CONFIG（未选文件夹时不报错，回引导文案）
+     */
+    _handleGetUserConfig(iframe) {
+        const reply = (payload) => {
+            iframe?.contentWindow.postMessage({
+                source: 'content',
+                type: 'USER_CONFIG_LOADED',
+                ...payload
+            }, '*');
+        };
+
+        if (!fileSystem.rootDirectoryHandle) {
+            reply({ success: false, error: '请先选择文件夹' });
+            return;
+        }
+
+        reply({
+            success: true,
+            // config：当前生效配置（未加载时回默认）；defaults：默认值供面板占位/重置
+            config: userConfig.getCurrent() || userConfig.buildDefault(),
+            defaults: userConfig.buildDefault()
+        });
+    }
+
+    /**
+     * ✅ 配置面板：响应 SAVE_USER_CONFIG
+     * 保存后：reloadConfigs 重建列表配置快照 → 按新 backup.enabled 补偿启停定时备份
+     * （边界：fileSystem.init() 的定时备份启动判定早于 ensureConfig，
+     *   选文件夹首启按静态默认，保存面板后在此立即对齐）
+     */
+    async _handleSaveUserConfig(config, iframe) {
+        const reply = (payload) => {
+            iframe?.contentWindow.postMessage({
+                source: 'content',
+                type: 'SAVE_USER_CONFIG_RESULT',
+                ...payload
+            }, '*');
+        };
+
+        if (!fileSystem.rootDirectoryHandle) {
+            reply({ success: false, error: '请先选择文件夹' });
+            return;
+        }
+
         try {
-            const { getSetting } = await import('../data/storage/settings-manager.js');
-            const mode = await getSetting('sidebar_mode', 'hover');
-            
-            logger.info(`📋 返回侧边栏模式: ${mode}`);
-            
-            // 发送响应到 Sidebar
-            iframe.contentWindow.postMessage({
-                source: 'content',
-                type: 'SIDEBAR_MODE_RESPONSE',
-                mode: mode
-            }, '*');
+            await userConfig.save(fileSystem, config || {});
+            dataFetcher.reloadConfigs();
+
+            // ✅ 定时备份启停对齐（startPeriodicBackup 幂等：内部先清旧定时器，interval 变更同样重起生效）
+            const { backupManager } = await import('../data/backup/backup-manager.js');
+            if (CONFIG.BACKUP_CONFIG.enabled === true) {
+                backupManager.startPeriodicBackup();
+            } else {
+                backupManager.stopPeriodicBackup();
+            }
+
+            reply({ success: true, config: userConfig.getCurrent() });
         } catch (error) {
-            logger.error('❌ 获取侧边栏模式失败:', error);
-            
-            // 发送默认值
-            iframe.contentWindow.postMessage({
-                source: 'content',
-                type: 'SIDEBAR_MODE_RESPONSE',
-                mode: 'hover'
-            }, '*');
+            logger.error('❌ 保存用户配置失败:', error);
+            reply({ success: false, error: error.message || String(error) });
         }
     }
 }
@@ -1082,5 +872,21 @@ class ContentScript {
 // 启动 Content Script
 logger.info('🚀 Content Script 启动...');
 window.contentScript = new ContentScript();
+
+// ✅ 全局错误边界：logger + fileLogger 落盘，并转发 UI_LOG 进侧边栏日志与红条提示
+installErrorBoundary({
+    context: 'Content',
+    onError: ({ message, count, error }) => {
+        const summary = String(message || '').split('\n')[0];
+        const label = `[Content] ${summary}${count > 1 ? ` (x${count})` : ''}`;
+        logger.error('❌ 未捕获错误:', error || message);
+        try {
+            fileLogger.writeToFile('error', 'ContentScript', label);
+        } catch (e) {
+            // 落盘失败不影响转发
+        }
+        window.contentScript._sendToSidebar({ type: 'UI_LOG', level: 'error', message: label });
+    }
+});
 
 

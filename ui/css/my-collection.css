@@ -177,6 +177,24 @@ body {
     cursor: pointer;
 }
 
+/* ✅ 排序项职责分离：方框=启用/停用，文本与箭头=升/降序（整块不再继承 pointer） */
+.sort-item {
+    cursor: default;
+}
+
+.sort-text {
+    cursor: pointer;
+}
+
+.sort-text:hover {
+    color: #1890ff;
+}
+
+/* 已启用（勾选）的排序维度：文本与箭头一同高亮，一眼看出叠加了哪几层 */
+.sort-item:has(input:checked) .sort-text {
+    color: #1890ff;
+}
+
 .sort-direction {
     background: transparent;
     border: 1px solid #d9d9d9;
