@@ -45,8 +45,9 @@ function formatDate(ms) {
  * 生成作品卡片 HTML
  * @param {Object} work - 作品数据对象
  * @param {Set} selectedWorkIds - 选中的作品ID集合（可选）
+ * @param {'download'|'backfill'} [intent='download'] - 选择意图：backfill（校验补全）下已保存作品复选框解禁且可勾选
  */
-function createWorkCardHTML(work, selectedWorkIds = null) {
+function createWorkCardHTML(work, selectedWorkIds = null, intent = 'download') {
     const authorName = work.author?.nickname || '未知作者';
     const desc = work.desc || '无描述';
     const coverUrl = work.video?.coverUrl || '';
@@ -69,7 +70,9 @@ function createWorkCardHTML(work, selectedWorkIds = null) {
 
     // 检查是否已下载
     const isDownloaded = work.isDownloaded === true;
-    
+    // ✅ 复选框禁用口径：下载意图下已保存不可选（走单卡补全）；校验补全意图下已保存作品解禁、可逐卡勾选/取消
+    const checkboxDisabled = intent === 'backfill' ? false : isDownloaded;
+
     // 检查是否被选中（用于分页时保持 checkbox 状态）
     const isChecked = selectedWorkIds && selectedWorkIds.has(workId);
 
@@ -85,9 +88,9 @@ function createWorkCardHTML(work, selectedWorkIds = null) {
             cursor: pointer;
         ">
             <input type="checkbox" class="work-checkbox" data-work-id="${workId}" 
-                ${isDownloaded ? 'disabled' : ''}
+                ${checkboxDisabled ? 'disabled' : ''}
                 ${isChecked ? 'checked' : ''}
-                style="margin-right: 0; cursor: ${isDownloaded ? 'not-allowed' : 'pointer'}; opacity: ${isDownloaded ? '0.5' : '1'};">
+                style="margin-right: 0; cursor: ${checkboxDisabled ? 'not-allowed' : 'pointer'}; opacity: ${checkboxDisabled ? '0.5' : '1'};">
             ${coverUrl ? `
                 <img src="${coverUrl}" style="width: 80px; height: 100px; object-fit: cover; border-radius: 4px;" />
             ` : ''}
@@ -119,20 +122,20 @@ function createWorkCardHTML(work, selectedWorkIds = null) {
                         white-space: nowrap;
                         box-sizing: border-box;
                     ">🔗 跳转</a>
-                    <button class="download-btn" data-work-id="${workId}" style="
+                    <button class="download-btn" data-work-id="${workId}" title="${isDownloaded ? '已保存，点击检查并补全缺失的文件' : ''}" style="
                         padding: 4px 6px;
                         width: 80px;
                         background: ${isDownloaded ? '#52c41a' : '#1890ff'};
                         color: white;
                         border: none;
                         border-radius: 4px;
-                        cursor: ${isDownloaded ? 'default' : 'pointer'};
+                        cursor: pointer;
                         font-size: 12px;
                         text-align: center;
                         display: inline-block;
                         white-space: nowrap;
                         box-sizing: border-box;
-                    " ${isDownloaded ? 'disabled' : ''}>${isDownloaded ? '✅ 已保存' : '⬇️ 保存'}</button>
+                    ">${isDownloaded ? '✅ 已保存' : '⬇️ 保存'}</button>
                 </div>
             </div>
         </div>
@@ -144,8 +147,9 @@ function createWorkCardHTML(work, selectedWorkIds = null) {
  * @param {HTMLElement} listEl - 列表容器元素
  * @param {Array} works - 作品数据数组
  * @param {Set} selectedWorkIds - 选中的作品ID集合（可选，用于分页时保持 checkbox 状态）
+ * @param {'download'|'backfill'} [intent='download'] - 选择意图（校验补全态下已保存作品复选框解禁）
  */
-export function renderWorkList(listEl, works, selectedWorkIds = null) {
+export function renderWorkList(listEl, works, selectedWorkIds = null, intent = 'download') {
     if (!listEl) {
         logger.warn('⚠️ 列表容器元素不存在');
         return;
@@ -156,7 +160,7 @@ export function renderWorkList(listEl, works, selectedWorkIds = null) {
         return;
     }
 
-    const html = works.map(work => createWorkCardHTML(work, selectedWorkIds)).join('');
+    const html = works.map(work => createWorkCardHTML(work, selectedWorkIds, intent)).join('');
 
     listEl.innerHTML = html;
 

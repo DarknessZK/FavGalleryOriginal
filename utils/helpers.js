@@ -29,7 +29,8 @@ const logger = createLogger('Helpers');
  * @param {number} extraOptions.delayMs - 请求间隔延迟（毫秒）
  * @param {number} extraOptions.maxRetries - 最大重试次数
  * @param {boolean} extraOptions.isFullyLoaded - 是否曾经完整加载过（用于控制早期退出）
- * @returns {Promise<Object>} { items: 原始拉取窗口（含缓存命中项，保持 API 新→旧顺序）, hasMore: 列表是否未拉取完整 }
+ * @returns {Promise<Object>} { items: 原始拉取窗口（含缓存命中项，保持 API 新→旧顺序）, hasMore: 列表是否未拉取完整,
+ *   sawEnd: 本轮是否确实看到清单末尾（软删除的唯一合法依据）, partial: 本轮是否存在重试耗尽的失败 }
  */
 export async function smartIncrementalFetch(
     fetchFn,
@@ -52,6 +53,12 @@ export async function smartIncrementalFetch(
     let newCount = 0; // 新增数据计数
     let rawFetched = 0; // ✅ 原始拉取总数（含被过滤的缓存重复项）
 
+    // ✅ 清单完整性证据（供上层判定是否有权做软删除）
+    //    sawEnd：确实看到清单末尾（API 明确回复没有更多，且未被本地上限截断）
+    //    partial：存在重试耗尽的失败，本轮只拿到部分结果
+    let sawEnd = false;
+    let partial = false;
+
     // ✅ 停止条件按“原始拉取总数”判断：maxCount 限制的是 API 拉取量，而非新增数量
     while (hasMore && rawFetched < maxCount) {
         try {
@@ -61,6 +68,14 @@ export async function smartIncrementalFetch(
 
             if (!result || !result.data || result.data.length === 0) {
                 logger.warn('⚠️ 获取数据为空');
+                // ✅ 空批次不能单独作为“清单到底”的证据：接口异常同样表现为空。
+                //    必须同时满足“API 明确回复没有更多”且“此前已拉到过数据”，才视为正常到底。
+                const explicitlyEnded = !!result && result.hasMore === false;
+                sawEnd = explicitlyEnded && rawFetched > 0;
+                if (!explicitlyEnded) {
+                    partial = true;
+                    logger.warn('⚠️ 空批次且未明确回复到底：视为本轮不可信，不做软删除判定');
+                }
                 hasMore = false;
                 break;
             }
@@ -87,7 +102,8 @@ export async function smartIncrementalFetch(
                 // 追加本批原始数据（含缓存命中项），保持窗口顺序完整
                 newCount += newData.length;
                 allData = allData.concat(result.data);
-                // ✅ 提前退出时缓存完整性保持（新数据只会出现在头部），返回 hasMore: false 维持 isFullyLoaded
+                // ✅ 提前退出只看到清单头部，并未确认末尾：无权对窗口外条目下“已取消”结论
+                sawEnd = false;
                 hasMore = false;
                 break;
             }
@@ -109,8 +125,10 @@ export async function smartIncrementalFetch(
                 onProgress(Math.min(rawFetched, maxCount), maxCount);
             }
 
-            // 如果已满足需求或没有更多数据，退出（达到 maxCount 上限时 hasMore 保持 true，表示还有未拉取数据）
+            // ✅ 只有 API 明确回复没有更多才算到底；达到加载上限被截断时窗口外条目不可判定
             if (!hasMore || rawFetched >= maxCount) {
+                // ✅ 严格等于 false 才算到底：hasMore 为 undefined（接口字段缺失/失败被吞）时不得当成“已看完”
+                sawEnd = hasMore === false;
                 break;
             }
 
@@ -123,10 +141,15 @@ export async function smartIncrementalFetch(
 
         } catch (error) {
             currentRetry++;
-            logger.error(`❌ 获取失败 (尝试 ${currentRetry}/${maxRetries}):`, error);
+            // ✅ 取 message 输出：logger 会对第二参做 JSON.stringify，
+            //    Error 对象序列化后是空对象，日志里只剩 “获取失败 (尝试 1/3): {}”，排障看不到原因
+            logger.error(`❌ 获取失败 (尝试 ${currentRetry}/${maxRetries}): ${error?.message || String(error)}`);
 
             if (currentRetry >= maxRetries) {
                 logger.error('❌ 达到最大重试次数，停止获取');
+                // ✅ 失败不等于到底：本轮清单不完整，无权下软删除结论
+                partial = true;
+                sawEnd = false;
                 break;
             }
 
@@ -137,118 +160,14 @@ export async function smartIncrementalFetch(
         }
     }
 
-    logger.info(`✅ 智能增量获取完成: 新增 ${newCount} 条，总计 ${allData.length} 条数据（原始拉取 ${rawFetched} 条，hasMore=${hasMore}）`);
-    return { items: allData.slice(0, maxCount), hasMore };
-}
+    logger.info(`✅ 智能增量获取完成: 新增 ${newCount} 条，总计 ${allData.length} 条数据（原始拉取 ${rawFetched} 条，hasMore=${hasMore}，sawEnd=${sawEnd}，partial=${partial}）`);
 
-/**
- * 合并缓存数据和 API 数据（通用方法）
- * 🎯 关键：以 API 返回的顺序为准，保持最新排序
- * @param {Array} cachedData - 缓存数据
- * @param {Array} apiData - API 返回的最新数据
- * @param {string} idField - 唯一标识字段名
- * @param {Object} defaultFields - 新数据的默认字段
- * @param {Array} preserveFields - 需要保留的字段（从缓存中保留）
- * @returns {Object} - { mergedData, newCount, updatedCount }
- */
-export function mergeDataWithCache(cachedData, apiData, idField, defaultFields = {}, preserveFields = []) {
-    const cachedMap = new Map(cachedData.map(item => [item[idField], item]));
-    let newCount = 0;
-    let updatedCount = 0;
-
-    logger.info(`[MergeData] 🔍 开始合并数据: 缓存 ${cachedData.length} 条, API ${apiData.length} 条, 对比字段: ${idField}`);
-
-    // 调试：打印前3个缓存ID和前3个API ID
-    if (cachedData.length > 0) {
-        logger.info(`[MergeData]    缓存前3个ID: ${cachedData.slice(0, 3).map(item => item[idField]).join(', ')}`);
-    }
-    if (apiData.length > 0) {
-        logger.info(`[MergeData]    API前3个ID: ${apiData.slice(0, 3).map(item => item[idField]).join(', ')}`);
+    // ✅ 返回窗口被本地上限截断时，等于没看到完整清单，强制取消到底资格
+    if (allData.length > maxCount) {
+        sawEnd = false;
     }
 
-    // 🎯 关键修复：先处理 API 数据，保留需要 preserved 的字段
-    const apiProcessed = apiData.map(newItem => {
-        if (cachedMap.has(newItem[idField])) {
-            // 已存在，保留指定字段
-            const existing = cachedMap.get(newItem[idField]);
-            const preserved = {};
-
-            preserveFields.forEach(field => {
-                if (existing[field] !== undefined) {
-                    preserved[field] = existing[field];
-                }
-            });
-
-            updatedCount++;
-            
-            // 返回合并后的数据（保持 API 的顺序）
-            return {
-                ...existing,
-                ...newItem,
-                ...preserved,  // 覆盖回保留字段
-                lastCheckedTime: Date.now()
-            };
-        } else {
-            // 新增
-            newCount++;
-            return {
-                ...newItem,
-                ...defaultFields,
-                lastCheckedTime: Date.now()
-            };
-        }
-    });
-
-    // 🎯 关键修复：找出缓存中有但 API 中没有的数据（已被取消关注/点赞/收藏的作品）
-    const apiIds = new Set(apiData.map(item => item[idField]));
-    const onlyInCache = cachedData.filter(item => !apiIds.has(item[idField]));
-    
-    logger.info(`[MergeData] ✅ 合并结果: 新增 ${newCount}, 更新 ${updatedCount}, 仅在缓存中 ${onlyInCache.length}, API顺序 ${apiProcessed.length}`);
-
-    // 🎯 关键修复：返回时以 API 顺序为主，后面追加仅在缓存中的数据
-    return {
-        mergedData: [...apiProcessed, ...onlyInCache],  // API 顺序在前，旧数据在后
-        newCount,
-        updatedCount
-    };
-}
-
-/**
- * ✅ 合并作品数据并更新元数据（通用工具方法）
- * @param {Array} cachedWorks - 缓存的作品列表
- * @param {Array} apiWorks - API返回的作品列表
- * @param {Object} metadata - 原元数据
- * @param {string} metadataField - 元数据字段名
- * @param {Object} apiResult - API 返回结果
- * @returns {Object} 合并后的数据和更新后的元数据
- */
-export function mergeWorkData(cachedWorks, apiWorks, metadata, metadataField, apiResult) {  // ✅ 改为 mergeWorkData
-    const { mergedData, newCount } = mergeDataWithCache(
-        cachedWorks,  // ✅ 参数名已正确
-        apiWorks,     // ✅ 参数名已正确
-        'workId',
-        { downloadStatus: 'pending', downloaded: false, downloadTime: 0, filePath: '' },
-        ['downloadStatus', 'downloaded', 'downloadTime', 'filePath']
-    );
-
-    // ✅ 判断是否完整加载（双重判断机制）：
-    // 情况1：API 返回的作品数 < 请求的 maxCount（已经到底了）
-    // 情况2：所有返回的作品都已缓存（说明没有新作品了，适用于开发环境小批量测试）
-    const apiRequestedCount = apiResult.requestedCount || CONFIG.FETCH_CONFIG.LIST_CONFIGS.liked.maxCount;
-    const isFullyLoaded = 
-        (apiWorks.length > 0 && apiWorks.length < apiRequestedCount) ||
-        (apiWorks.length > 0 && newCount === 0);
-
-    const updatedMetadata = {
-        ...metadata,
-        [metadataField]: apiResult[metadataField],
-        lastUpdate: Date.now(),
-        totalCount: mergedData.length,
-        // ✅ 新增：完整加载标记（一旦为 true，就永远不会变回 false）
-        isFullyLoaded: metadata.isFullyLoaded || isFullyLoaded
-    };
-
-    return { mergedData, newCount, updatedMetadata };
+    return { items: allData.slice(0, maxCount), hasMore, sawEnd, partial };
 }
 
 /**

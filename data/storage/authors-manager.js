@@ -236,4 +236,51 @@ export async function updateAuthorsDownloadStats(fileSystem, stats = {}) {
     }
 }
 
+/**
+ * ✅ 标记作者已取消关注（软删除，Content 主库唯一合法写入口）
+ *
+ * 语义：条目继续保留在列表与 authors 表里，只是不再允许下载其作品；
+ *       已下载的作品与本地文件一律不动，物理清理由离线浏览页的失效项功能负责（未来需求）。
+ * 调用时机：下载前的关注状态单点校验拿到“已取关”这一明确证据时；
+ *       状态不可判定（unknown）绝不得走到这里。
+ *
+ * @param {Object} fileSystem - FileSystem 实例
+ * @param {Array<string>} uids - 已确认取关的作者 UID 列表
+ * @param {string} [reason] - 判定依据，落库以便事后核对
+ * @returns {Promise<number>} 实际标记的条数
+ */
+export async function markAuthorsUnfollowed(fileSystem, uids = [], reason = '下载前关注状态单点校验') {
+    await fileSystem.initDatabase();
+
+    let marked = 0;
+    for (const uid of uids) {
+        try {
+            const existing = await database.get('authors', uid);
+            if (!existing) {
+                logger.warn(`⚠️ 主库无该作者记录，跳过取关标记: ${uid}`);
+                continue;
+            }
+            if (existing.isDeleted) {
+                logger.debug(`ℹ️ 作者已是软删除态，无需重复标记: ${uid}`);
+                continue;
+            }
+
+            // ✅ 整条合并写回：save 是 put 覆盖，只传部分字段会丢昵称/头像等基础数据
+            await database.save('authors', {
+                ...existing,
+                isDeleted: true,
+                unfollowedAt: Date.now(),
+                unfollowReason: reason,
+                lastCheckedTime: Date.now()
+            });
+            marked++;
+            logger.info(`🗑️ 已标记作者软删除（条目保留在列表与表中，不再下载其作品）: ${existing.nickname || uid}`);
+        } catch (error) {
+            logger.warn(`⚠️ 标记作者取关失败: ${uid} ${error.message}`);
+        }
+    }
+
+    return marked;
+}
+
 

@@ -5,7 +5,9 @@
 
 import { createLogger, logToUI } from '../utils/logger.js';
 import { CONFIG } from '../config/constants.js';
+import { DURATION_BUCKETS } from '../config/constants.js';
 import { MultiTagSelector } from '../ui/components/multi-tag-selector.js';
+import { showConfirmModal } from '../utils/ui-helpers.js';
 
 const logger = createLogger('EventBinder');
 
@@ -17,6 +19,8 @@ class EventBinder {
         this._filterApplyFns = {};
         // ✅ 自定义排序下拉组件实例（按 prefix 缓存）
         this.sortDropdowns = {};
+        // ✅ 自定义“时长”多选下拉实例（按 prefix 缓存）
+        this.durationDropdowns = {};
     }
 
     /**
@@ -190,6 +194,7 @@ class EventBinder {
      */
     _showLibraryGuide(hint, res) {
         const folderName = this.app.folderName || '你选择的文件夹';
+        const accountFolder = this.app.accountFolderName; // 账号数据区子目录（新版布局）
         const entryName = CONFIG.FILE_SYSTEM.OFFLINE_ENTRY_HTML;
 
         let body;
@@ -199,10 +204,13 @@ class EventBinder {
                 `📂 已记住本地库路径，但浏览器拦截了打开操作。<br>` +
                 `请在 <strong>chrome://extensions</strong> → 本扩展「详情」里开启 <strong>「允许访问文件网址」</strong>，之后点这个按钮即可一键直达。<br>`;
         } else {
-            // 尚无路径（从没打开过）→ 种子引导
+            // 尚无路径（从没打开过）→ 种子引导（新布局需多进一层账号数据区目录）
+            const locateHint = accountFolder
+                ? `在文件管理器中打开你选择的文件夹「<strong>${folderName}</strong>」，进入其中创建的「<strong>${accountFolder}</strong>」，双击其中的 <strong>${entryName}</strong>`
+                : `在文件管理器中打开你选择的文件夹「<strong>${folderName}</strong>」，双击其中的 <strong>${entryName}</strong>`;
             body =
                 `📂 本地库入口文件：<strong>${entryName}</strong><br>` +
-                `首次使用请手动打开一次：在文件管理器中打开你选择的文件夹「<strong>${folderName}</strong>」，双击其中的 <strong>${entryName}</strong> 即可离线浏览。<br>` +
+                `首次使用请手动打开一次：${locateHint}即可离线浏览。<br>` +
                 `<span style="color:#8c8c8c;">打开一次后，扩展会自动记住它的位置，<strong>以后点这个按钮就能一键直达</strong>（需在扩展详情开启「允许访问文件网址」）。</span>`;
         }
 
@@ -355,6 +363,9 @@ class EventBinder {
                 
                 // ✅ 重新查询下载状态并更新 allWorks
                 await this.app.refreshListDownloadStatus(manager);
+
+                // ✅ 搜索改变展示数据集 → 规则型批量模式随新结果重算（与筛选联动同理）
+                this.app.batchSelectionManager?.reapplyBatchMode(listType);
     
                 // ✅ 获取当前页的选中状态，传递给 updateUI
                 const currentPageItems = manager.getCurrentPageData();
@@ -386,6 +397,9 @@ class EventBinder {
                 
                 // ✅ UI 日志
                 logToUI('info', `🔍 搜索作者: ${event.target.value}`);
+
+                // ✅ 搜索改变展示数据集 → 规则型批量模式随新结果重算（与筛选联动同理）
+                this.app.batchSelectionManager?.reapplyBatchMode('following');
                 
                 // ✅ 获取当前页的选中状态，传递给 updateUI
                 const currentPageItems = manager.getCurrentPageData();
@@ -441,11 +455,16 @@ class EventBinder {
                 type: (typeSelect && typeSelect.value) || 'all',
                 dateFrom: fromInput.value || '',
                 dateTo: toInput.value || '',
-                authorIds: (supportsAuthor && selector) ? Array.from(selector.getSelectedIds()) : []
+                authorIds: (supportsAuthor && selector) ? Array.from(selector.getSelectedIds()) : [],
+                durations: this.durationDropdowns[prefix] ? this.durationDropdowns[prefix].getSelected() : []
             });
 
             // ✅ 重新查询下载状态并更新 allWorks
             await this.app.refreshListDownloadStatus(manager);
+
+            // ✅ 筛选/排序/作者多选改变了展示数据集 → 若存在规则型批量模式（选中当前页/全选），
+            //    按新展示集重算选中（当前页∩筛选 / 全部∩筛选），取消筛选则自动回退
+            this.app.batchSelectionManager?.reapplyBatchMode(manager.type);
 
             // ✅ 获取当前页的选中状态，传递给 updateUI（authorWorks 钻取视图同样适用）
             const listType = manager.type;
@@ -462,15 +481,23 @@ class EventBinder {
         };
 
         savedSelect.addEventListener('change', applyFilters);
-        if (typeSelect) typeSelect.addEventListener('change', applyFilters);
+        if (typeSelect) typeSelect.addEventListener('change', () => {
+            // ✅ 类型离开“视频”时清空时长多选，避免隐藏条件下仍参与过滤
+            if (typeSelect.value !== 'video' && this.durationDropdowns[prefix]) {
+                this.durationDropdowns[prefix].clear();
+            }
+            applyFilters();
+        });
         fromInput.addEventListener('change', applyFilters);
         toInput.addEventListener('change', applyFilters);
         // ✅ 自定义排序下拉（点击已选中项切换升/降序）
         this._setupSortDropdown(prefix, getManager, applyFilters);
+        // ✅ 自定义“时长”多选下拉（仅视频模式可用）
+        this._setupDurationDropdown(prefix, applyFilters);
 
-        // ✅ 登记 applyFilters 回引，供作者选择器 onSelectionChange 复用；并绑定“按作者筛选”展开/收起按钮
+        // ✅ 登记 applyFilters 回引：供作者选择器 onSelectionChange 与「已保存（补全）」作用域联动复用
+        this._filterApplyFns[prefix] = applyFilters;
         if (supportsAuthor) {
-            this._filterApplyFns[prefix] = applyFilters;
             const authorToggle = document.getElementById(`${prefix}AuthorFilterToggle`);
             if (authorToggle) authorToggle.addEventListener('click', () => this._toggleAuthorFilter(prefix));
         }
@@ -481,6 +508,9 @@ class EventBinder {
             if (typeSelect) typeSelect.value = 'all';
             fromInput.value = '';
             toInput.value = '';
+            // ✅ 重置时长多选
+            const durDd = this.durationDropdowns[prefix];
+            if (durDd) durDd.clear();
             // ✅ 清空作者多选选择器（其 onSelectionChange 会回驱一次 applyFilters，与下方显式调用一致）
             const selector = this.authorSelectors[prefix];
             if (selector) selector.clear();
@@ -488,9 +518,38 @@ class EventBinder {
             if (manager) manager.sort = { key: '', dir: 'desc' };
             const sd = this.sortDropdowns[prefix];
             if (sd) sd.reset();
+            // ✅ 重置同时清空批量选择（含规则型模式 batchMode），避免筛选条件复位后仍残留上一轮的选中集
+            if (manager) this.app.batchSelectionManager?.clearSelection(manager.type);
             await applyFilters();
             logToUI('info', '🧹 已重置筛选条件');
         });
+    }
+
+    /**
+     * ✅ 复位筛选栏 DOM 控件到默认值（与 WorkListManager.setData 的内部状态重置保持同步）
+     * 场景：点击「刷新/加载列表」后 setData 已把 filters/keyword/sort 归零并重渲全量，
+     *      但下拉/输入框等 DOM 控件仍停留在用户上次的选择，会造成「条件显示还在、实际未生效」的错觉。
+     * 说明：仅同步 DOM，不调用 applyFilters（此时列表已是全量默认态，无需再触发一次筛选渲染）；
+     *      作者多选的清空由 refreshAuthorFilterOptions → updateData 静默完成，此处不重复处理以免误触发回驱。
+     * @param {string} prefix - 控件 ID 前缀 ('liked' | 'bookmarked')
+     */
+    resetFilterControls(prefix) {
+        const savedSelect = document.getElementById(`${prefix}FilterSaved`);
+        const typeSelect = document.getElementById(`${prefix}FilterType`);
+        const fromInput = document.getElementById(`${prefix}FilterFrom`);
+        const toInput = document.getElementById(`${prefix}FilterTo`);
+        const searchInput = document.getElementById(`${prefix}SearchInput`);
+        if (savedSelect) savedSelect.value = 'all';
+        if (typeSelect) typeSelect.value = 'all';
+        if (fromInput) fromInput.value = '';
+        if (toInput) toInput.value = '';
+        if (searchInput) searchInput.value = '';
+        // 排序下拉：manager.sort 已由 setData 归零，这里只把触发器文案同步回「默认排序」
+        const sd = this.sortDropdowns[prefix];
+        if (sd) sd.reset();
+        // 时长多选：随筛选条件复位一同清空选中（is-disabled 态由 updateUI → _updateFilterBarState 按类型重置）
+        const dd = this.durationDropdowns[prefix];
+        if (dd) dd.clear();
     }
 
     /**
@@ -575,6 +634,75 @@ class EventBinder {
         document.addEventListener('click', () => api.close());
 
         this.sortDropdowns[prefix] = api;
+        api.render();
+    }
+
+    /**
+     * ✅ 构建自定义“时长”多选下拉：档位来自 DURATION_BUCKETS，复选式多选（勾中任一即命中），
+     * 多选时不自动收起、点页面其它处收起；选中集写入 manager.filters.durations（由 applyFilters 读取 getSelected）。
+     * @param {string} prefix - 控件 ID 前缀
+     * @param {Function} applyFilters - 选中变化后的刷新回调
+     */
+    _setupDurationDropdown(prefix, applyFilters) {
+        const root = document.getElementById(`${prefix}FilterDuration`);
+        const trigger = document.getElementById(`${prefix}FilterDurationTrigger`);
+        const menu = document.getElementById(`${prefix}FilterDurationMenu`);
+        if (!root || !trigger || !menu) return;
+        const labelEl = trigger.querySelector('.dur-label');
+
+        const api = {
+            _selected: new Set(),
+            getSelected() { return Array.from(api._selected); },
+            render() {
+                const n = api._selected.size;
+                labelEl.textContent = n ? `时长(${n})` : '时长';
+                root.classList.toggle('has-active', n > 0);
+                menu.innerHTML = '';
+                DURATION_BUCKETS.forEach(b => {
+                    const checked = api._selected.has(b.key);
+                    const item = document.createElement('div');
+                    item.className = 'dur-item' + (checked ? ' checked' : '');
+                    const check = document.createElement('span');
+                    check.className = 'dur-check';
+                    check.textContent = checked ? '☑' : '☐';
+                    const label = document.createElement('span');
+                    label.textContent = b.label;
+                    item.appendChild(check);
+                    item.appendChild(label);
+                    item.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        api._toggle(b.key);
+                    });
+                    menu.appendChild(item);
+                });
+            },
+            _toggle(key) {
+                if (api._selected.has(key)) api._selected.delete(key);
+                else api._selected.add(key);
+                api.render();
+                applyFilters();
+            },
+            clear() {
+                if (api._selected.size === 0) { return; }
+                api._selected.clear();
+                api.close();
+                api.render();
+            },
+            open() { root.classList.add('open'); },
+            close() { root.classList.remove('open'); },
+            toggle() { root.classList.toggle('open'); }
+        };
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (root.classList.contains('is-disabled')) return;
+            api.toggle();
+        });
+        // 菜单内点击不关闭（多选），点页面其它处自动收起
+        menu.addEventListener('click', (e) => e.stopPropagation());
+        document.addEventListener('click', () => api.close());
+
+        this.durationDropdowns[prefix] = api;
         api.render();
     }
 
@@ -922,6 +1050,11 @@ class EventBinder {
             const downloadBtn = event.target.closest('.download-btn');
             if (downloadBtn && !downloadBtn.disabled) {
                 const workId = downloadBtn.dataset.workId;
+                // ✅ 已有保存任务进行中时忽略（“已保存”按钮现常驻可点，防止误点另起批量抢占 content 侧当前批次）
+                if (this.app.downloadHandler?.isDownloading) {
+                    logToUI('warning', '⚠️ 已有保存任务进行中，请等待完成或先停止');
+                    return;
+                }
                 logger.info(`👆 点击了下载按钮: ${workId}`);
                 
                 // ✅ 根据列表类型调用对应的独立方法
@@ -979,16 +1112,11 @@ class EventBinder {
         const likedStopDownloadBtn = document.querySelector('#tabContentLiked .stop-download-btn');
 
         if (likedBatchSelect) {
-            likedBatchSelect.addEventListener('change', (event) => {
-                this.app.handleBatchSelectionChange('liked', event.target.value);
-            });
+            this._buildBatchScopeDropdown('liked', true);
         }
 
         if (likedBatchDownloadBtn) {
-            likedBatchDownloadBtn.addEventListener('click', () => {
-                const selectedIds = this.app.batchSelectionManager.getSelectedWorkIds('liked');
-                this.app.handleLikedDownload(selectedIds);
-            });
+            likedBatchDownloadBtn.addEventListener('click', () => this._onWorksBatchButtonClick('liked'));
         }
 
         if (likedStopDownloadBtn) {
@@ -1007,16 +1135,11 @@ class EventBinder {
         const bookmarkedStopDownloadBtn = document.querySelector('#tabContentBookmarked .stop-download-btn');
 
         if (bookmarkedBatchSelect) {
-            bookmarkedBatchSelect.addEventListener('change', (event) => {
-                this.app.handleBatchSelectionChange('bookmarked', event.target.value);
-            });
+            this._buildBatchScopeDropdown('bookmarked', true);
         }
 
         if (bookmarkedBatchDownloadBtn) {
-            bookmarkedBatchDownloadBtn.addEventListener('click', () => {
-                const selectedIds = this.app.batchSelectionManager.getSelectedWorkIds('bookmarked');
-                this.app.handleBookmarkedDownload(selectedIds);
-            });
+            bookmarkedBatchDownloadBtn.addEventListener('click', () => this._onWorksBatchButtonClick('bookmarked'));
         }
 
         if (bookmarkedStopDownloadBtn) {
@@ -1035,9 +1158,7 @@ class EventBinder {
         const followingStopDownloadBtn = document.querySelector('#tabContentFollowing .stop-download-btn');
 
         if (followingBatchSelect) {
-            followingBatchSelect.addEventListener('change', (event) => {
-                this.app.handleBatchSelectionChange('following', event.target.value);
-            });
+            this._buildBatchScopeDropdown('following', false);
         }
 
         if (followingBatchDownloadBtn) {
@@ -1065,16 +1186,11 @@ class EventBinder {
         const stopDownloadBtn = document.querySelector('#authorWorksBatchActions .stop-download-btn');
 
         if (batchSelect) {
-            batchSelect.addEventListener('change', (event) => {
-                this.app.handleBatchSelectionChange('authorWorks', event.target.value);
-            });
+            this._buildBatchScopeDropdown('authorWorks', true);
         }
 
         if (batchDownloadBtn) {
-            batchDownloadBtn.addEventListener('click', () => {
-                const selectedIds = this.app.batchSelectionManager.getSelectedWorkIds('authorWorks');
-                this.app.handleAuthorWorksDownload(selectedIds);
-            });
+            batchDownloadBtn.addEventListener('click', () => this._onWorksBatchButtonClick('authorWorks'));
         }
 
         if (stopDownloadBtn) {
@@ -1084,6 +1200,179 @@ class EventBinder {
         }
     }
     
+    /**
+     * ✅ 构建自定义“批量选择”作用域下拉（替换原生 select）
+     * 原生 select 无法给单项高亮、也捕捉不到“再次点同一项”的切换，故自建下拉：
+     *  - 点作用域项 → 勾选 + 该项标蓝（记 state.activeScope）；再次点已高亮项 → 取消勾选 + 去高亮
+     *  - 'saved'（仅作品列表）额外联动：锁筛选到“已保存”(不可改) + 当前页已保存作品全勾选且复选框解禁可逐卡操作
+     *  - 高亮持续到用户主动切换/取消；手动逐个勾选不改高亮（activeScope 独立于 batchMode）
+     * @param {string} listType - 'liked' | 'bookmarked' | 'authorWorks' | 'following'
+     * @param {boolean} isWorks - 是否作品列表（决定是否有“已保存（补全）”项）
+     */
+    _buildBatchScopeDropdown(listType, isWorks) {
+        const root = document.getElementById(`${listType}BatchSelect`);
+        const trigger = document.getElementById(`${listType}BatchSelectTrigger`);
+        const menu = document.getElementById(`${listType}BatchSelectMenu`);
+        if (!root || !trigger || !menu) return;
+        const labelEl = trigger.querySelector('.batch-scope-label');
+
+        const OPTIONS = isWorks
+            ? [
+                { value: 'current', label: '当前页作品' },
+                { value: 'all', label: '所有作品' },
+                { value: 'saved', label: '已保存（补全）' }
+            ]
+            : [
+                { value: 'current', label: '当前页作者' },
+                { value: 'all', label: '所有作者' }
+            ];
+
+        const sel = this.app.batchSelectionManager;
+        const closeMenu = () => root.classList.remove('open');
+
+        const paintMenu = () => {
+            menu.innerHTML = '';
+            const cur = (sel.state[listType] && sel.state[listType].activeScope) || '';
+            OPTIONS.forEach(o => {
+                const item = document.createElement('div');
+                item.className = 'batch-scope-item' + (o.value === cur ? ' active' : '');
+                const t = document.createElement('span');
+                t.textContent = o.label;
+                item.appendChild(t);
+                if (o.value === cur) {
+                    const c = document.createElement('span');
+                    c.className = 'batch-scope-check';
+                    c.textContent = '✓';
+                    item.appendChild(c);
+                }
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    closeMenu();
+                    this._onBatchScopePick(listType, o.value);
+                });
+                menu.appendChild(item);
+            });
+        };
+
+        const refresh = () => {
+            const cur = (sel.state[listType] && sel.state[listType].activeScope) || '';
+            const opt = OPTIONS.find(o => o.value === cur);
+            if (labelEl) labelEl.textContent = opt ? opt.label : '-- 批量选择 --';
+            trigger.classList.toggle('is-active', !!cur);
+            if (root.classList.contains('open')) paintMenu();
+        };
+        this.app.batchScopeRenderers = this.app.batchScopeRenderers || {};
+        this.app.batchScopeRenderers[listType] = refresh;
+
+        // 解锁“状态”筛选：仅当之前被补全态锁定过（值仍为 downloaded 且已退出 backfillMode）时恢复
+        this.app.batchScopeUnlockers = this.app.batchScopeUnlockers || {};
+        this.app.batchScopeUnlockers[listType] = () => {
+            const savedSelect = document.getElementById(`${listType}FilterSaved`);
+            const stillBackfill = !!(sel.state[listType] && sel.state[listType].backfillMode);
+            if (savedSelect && !stillBackfill && savedSelect.value === 'downloaded') {
+                savedSelect.value = 'all';
+                savedSelect.disabled = false;
+                this._filterApplyFns[listType]?.();
+            }
+            refresh();
+        };
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (root.classList.contains('open')) {
+                closeMenu();
+            } else {
+                document.querySelectorAll('.batch-scope-dropdown.open').forEach(d => d.classList.remove('open'));
+                paintMenu();
+                root.classList.add('open');
+            }
+        });
+        document.addEventListener('click', () => closeMenu());
+
+        refresh();
+    }
+
+    /**
+     * ✅ 点击作用域项：在当前作用域与目标项间做“选中 / 切换 / 取消”三态处理
+     * @param {string} listType
+     * @param {'current'|'all'|'saved'} value - 被点击的项
+     */
+    async _onBatchScopePick(listType, value) {
+        const sel = this.app.batchSelectionManager;
+        const state = sel.state[listType];
+        const manager = sel._getManager(listType);
+        const savedSelect = document.getElementById(`${listType}FilterSaved`);
+        const apply = this._filterApplyFns[listType];
+        const cur = (state && state.activeScope) || '';
+
+        if (value === 'saved') {
+            // 再次点击已高亮的 saved → 取消补全（clearSelection 会联动解锁+刷新）
+            if (cur === 'saved') { sel.clearSelection(listType); return; }
+            // 进入补全态：切渲染意图 + 标记规则 + 锁筛选到“已保存”，随后 applyFilters 重算并全勾选当前页已保存作品
+            if (state) { state.backfillMode = true; state.batchMode = 'saved'; state.activeScope = 'saved'; }
+            if (manager) manager.backfillMode = true;
+            if (savedSelect) savedSelect.value = 'downloaded';
+            if (apply) await apply();
+            this._refreshBatchScope(listType);
+            return;
+        }
+
+        // current/all：点已高亮项=取消（→''），否则=切换到该项
+        const target = (cur === value) ? '' : value;
+        const wasBackfill = !!(state && state.backfillMode);
+        if (wasBackfill) {
+            // 从补全态切走：先复位补全态与渲染意图、解除筛选锁定并重渲，再执行目标作用域选择
+            if (state) { state.backfillMode = false; state.batchMode = null; } // 清掉残留 'saved' 规则，避免 applyFilters 内 reapply 短暂按补全口径重算
+            if (manager) manager.backfillMode = false;
+            if (savedSelect) { savedSelect.value = 'all'; savedSelect.disabled = false; }
+            if (apply) await apply();
+        }
+        if (state) state.activeScope = target || null;
+        sel.handleBatchSelectionChange(listType, target);
+        this._refreshBatchScope(listType);
+    }
+
+    /**
+     * ✅ 主动刷新指定列表的“批量选择”下拉高亮（绕过 updateBatchSelectionUI 的时机补漏）
+     * @param {string} listType
+     */
+    _refreshBatchScope(listType) {
+        this.app.batchScopeRenderers?.[listType]?.();
+    }
+
+    /**
+     * ✅ 作品列表批量按钮统一点击入口（复用同一个按钮，按当前是否处于补全态分流）
+     * - 普通态（批量保存）：直接提交选中作品走下载管线
+     * - 补全态（校验补全）：先弹说明对话框（作用 + 仅限当前页原因），确定才提交，取消仅关框
+     * @param {string} listType - 'liked' | 'bookmarked' | 'authorWorks'
+     */
+    async _onWorksBatchButtonClick(listType) {
+        const sel = this.app.batchSelectionManager;
+        const selectedIds = sel.getSelectedWorkIds(listType);
+        const isBackfill = !!(sel.state[listType] && sel.state[listType].backfillMode);
+        if (isBackfill) {
+            const ok = await showConfirmModal({
+                title: '校验补全说明',
+                message: '「校验补全」会对当前页已标记为“已保存”的作品逐个核对本地文件，仅补下缺失的图片/封面/音频，已完整的会自动跳过。\n\n为何只能作用于当前页、不能全选所有作品？因为补全每个作品都需实时拉取一次作品详情来得到应有的文件清单，跨全部分页核对会产生海量请求、开销大且易触发平台风控，故仅限当前页。\n\n是否开始校验补全选中的 ' + selectedIds.length + ' 个作品？',
+                okText: '开始补全',
+                cancelText: '取消'
+            });
+            if (!ok) return;
+        }
+        this._dispatchWorksDownload(listType, selectedIds);
+    }
+
+    /**
+     * 根据列表类型调用对应的批量下载入口（补全与下载同一管线，管线内部已支持逐文件补缺）
+     * @param {string} listType
+     * @param {Array} ids - 作品 workId 数组
+     */
+    _dispatchWorksDownload(listType, ids) {
+        if (listType === 'liked') this.app.handleLikedDownload(ids);
+        else if (listType === 'bookmarked') this.app.handleBookmarkedDownload(ids);
+        else if (listType === 'authorWorks') this.app.handleAuthorWorksDownload(ids);
+    }
+
     /**
      * ✅ 绑定日志区域折叠/展开按钮
      */

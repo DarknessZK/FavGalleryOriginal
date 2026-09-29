@@ -148,6 +148,126 @@
             font-size: 13px;
         }
     </style>
+
+    <!-- 诊断日志（内联于此先于外部脚本执行，以捕获最早的加载/运行错误；不新增文件故无需登记 SHELL_FILES/WAR）：
+         file:// 无回写磁盘通道，故采用「内存环形缓冲 + localStorage 持久化 + 页内浮动面板」形态，
+         保持离线页双击即用；错误不再只躺在 console，页内可见可复制。 -->
+    <script>
+    (function () {
+        'use strict';
+        var KEY = 'favGalleryDiagV1';
+        var MAX = 200;
+        var buf = [];
+        var saveTimer = null;
+        var listeners = [];
+
+        try { var raw = localStorage.getItem(KEY); if (raw) { var a = JSON.parse(raw); if (Array.isArray(a)) buf = a; } } catch (e) {}
+
+        function persistNow() { try { localStorage.setItem(KEY, JSON.stringify(buf.slice(-MAX))); } catch (e) {} }
+        function schedulePersist() { if (saveTimer) return; saveTimer = setTimeout(function () { saveTimer = null; persistNow(); }, 1000); }
+        function push(level, msg, source) {
+            buf.push({ t: Date.now(), level: level, msg: String(msg == null ? '' : msg).slice(0, 500), source: source || '' });
+            if (buf.length > MAX) buf.splice(0, buf.length - MAX);
+            schedulePersist();
+            for (var i = 0; i < listeners.length; i++) { try { listeners[i](); } catch (e) {} }
+        }
+        function fmtLoc(e) {
+            if (!e) return '';
+            var s = e.fileName || e.sourceURL || e.filename || '';
+            var ln = e.lineNumber || e.line || '';
+            var cl = e.colNumber || e.column || '';
+            var loc = s ? (' @' + s + (ln ? ':' + ln : '') + (cl ? ':' + cl : '')) : '';
+            return (e.message || '') + loc;
+        }
+        var resSeen = Object.create(null);
+        window.addEventListener('error', function (ev) {
+            var t = ev.target || ev.srcElement;
+            // 资源加载失败：capture 阶段也会收到 <img>/<script>/<link> 的 error，它们不是 JS 运行时错误
+            if (t && t !== window && t.tagName) {
+                var tag = String(t.tagName).toLowerCase();
+                if (tag === 'img') return; // 裂图离线属预期（远程封面回源失败），页内已灰底兜底，不记录
+                var url = t.src || t.href || '';
+                var rk = tag + '|' + url;
+                if (resSeen[rk]) return; // 同一资源只记一次，避免刷屏
+                resSeen[rk] = 1;
+                push('warn', '资源加载失败 <' + tag + '> ' + url, 'resource');
+                return;
+            }
+            // JS 运行时错误（有 message / 堆栈位置）
+            push('error', fmtLoc(ev.error || ev) || '(无消息的运行时错误)', 'runtime');
+        }, true);
+        window.addEventListener('unhandledrejection', function (ev) {
+            var r = ev.reason;
+            push('error', (r && r.message) ? fmtLoc(r) : String(r), 'unhandledrejection');
+        });
+
+        var diag = {
+            log: function (m, s) { push('log', m, s || 'app'); },
+            warn: function (m, s) { push('warn', m, s || 'app'); },
+            error: function (m, s) { push('error', m, s || 'app'); },
+            entries: function () { return buf; },
+            clear: function () { buf = []; try { localStorage.removeItem(KEY); } catch (e) {} for (var i = 0; i < listeners.length; i++) { try { listeners[i](); } catch (e) {} } },
+            copyAll: function () {
+                var text = buf.map(function (e) { return new Date(e.t).toISOString() + ' [' + e.level + '] ' + (e.source ? '(' + e.source + ') ' : '') + e.msg; }).join('\n');
+                try {
+                    var ta = document.createElement('textarea');
+                    ta.value = text; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+                    document.body.appendChild(ta); ta.focus(); ta.select();
+                    var ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+                } catch (e) { return false; }
+            },
+            onChange: function (fn) { listeners.push(fn); }
+        };
+        window.__favGalleryDiag = diag;
+
+        function build() {
+            if (document.getElementById('fgDiagFab')) return;
+            var fab = document.createElement('div');
+            fab.id = 'fgDiagFab'; fab.className = 'fg-diag-fab'; fab.title = '离线页诊断日志'; fab.textContent = '\ud83d\udc1e 0';
+            var panel = document.createElement('div');
+            panel.id = 'fgDiagPanel'; panel.className = 'fg-diag-panel'; panel.style.display = 'none';
+            panel.innerHTML =
+                '<div class="fg-diag-head"><span class="fg-diag-title">诊断日志</span>' +
+                '<span class="fg-diag-sub" id="fgDiagSub"></span><span class="fg-diag-sp"></span>' +
+                '<button class="fg-diag-btn" id="fgDiagCopy">复制</button>' +
+                '<button class="fg-diag-btn" id="fgDiagClear">清空</button>' +
+                '<button class="fg-diag-btn fg-diag-close" id="fgDiagClose">\u00d7</button></div>' +
+                '<div class="fg-diag-list" id="fgDiagList"></div>';
+            document.body.appendChild(fab); document.body.appendChild(panel);
+
+            function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+            function paint() {
+                var n = buf.length, errN = 0;
+                for (var i = 0; i < buf.length; i++) if (buf[i].level === 'error') errN++;
+                fab.textContent = '\ud83d\udc1e ' + n;
+                fab.className = 'fg-diag-fab' + (errN ? ' has-error' : '') + (panel.style.display !== 'none' ? ' active' : '');
+                var sub = document.getElementById('fgDiagSub');
+                if (sub) sub.textContent = n + ' 条' + (errN ? ' · ' + errN + ' 错误' : '') + '（本地持久化）';
+                var list = document.getElementById('fgDiagList'); if (!list) return;
+                var html = '';
+                for (var j = buf.length - 1; j >= 0; j--) {
+                    var e = buf[j];
+                    html += '<div class="fg-diag-row lvl-' + e.level + '">' +
+                        '<span class="fg-diag-time">' + new Date(e.t).toLocaleTimeString('zh-CN') + '</span>' +
+                        '<span class="fg-diag-lvl">' + e.level + '</span>' +
+                        (e.source ? '<span class="fg-diag-src">' + esc(e.source) + '</span>' : '') +
+                        '<span class="fg-diag-msg">' + esc(e.msg) + '</span></div>';
+                }
+                list.innerHTML = html || '<div class="fg-diag-empty">暂无记录</div>';
+            }
+            fab.addEventListener('click', function () { panel.style.display = panel.style.display === 'none' ? 'flex' : 'none'; paint(); });
+            document.getElementById('fgDiagClose').addEventListener('click', function () { panel.style.display = 'none'; paint(); });
+            document.getElementById('fgDiagClear').addEventListener('click', function () { diag.clear(); });
+            document.getElementById('fgDiagCopy').addEventListener('click', function () {
+                var ok = diag.copyAll(); var b = document.getElementById('fgDiagCopy');
+                b.textContent = ok ? '已复制' : '失败'; setTimeout(function () { b.textContent = '复制'; }, 1200);
+            });
+            diag.onChange(paint);
+            paint();
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build); else build();
+    })();
+    </script>
 </head>
 <body>
     <div class="container">
@@ -189,11 +309,32 @@
 
             <!-- 筛选 / 每页 / 时间 / 排序 -->
             <div class="filter-sort-toolbar">
-                <div class="filter-section">
-                    <span class="label">筛选</span>
-                    <label class="filter-item"><input type="radio" name="filter" value="all" checked> 全部</label>
-                    <label class="filter-item"><input type="radio" name="filter" value="downloaded"> 已保存</label>
-                    <label class="filter-item"><input type="radio" name="filter" value="notDownloaded"> 未保存</label>
+                <div class="filter-groups">
+                    <div class="filter-section">
+                        <span class="label">筛选</span>
+                        <label class="filter-item"><input type="radio" name="filter" value="all" checked> 全部</label>
+                        <label class="filter-item"><input type="radio" name="filter" value="downloaded"> 已保存</label>
+                        <label class="filter-item"><input type="radio" name="filter" value="notDownloaded"> 未保存</label>
+                    </div>
+                    <!-- 作品类型（仅作品视图显示，显隐由 JS 控制）：样式与保存状态一致的单选组 -->
+                    <div class="type-filter-section" id="typeFilterSection" style="display:none;">
+                        <span class="label">类型</span>
+                        <label class="filter-item"><input type="radio" name="workType" value="all" checked> 全部</label>
+                        <label class="filter-item"><input type="radio" name="workType" value="video"> 视频</label>
+                        <label class="filter-item"><input type="radio" name="workType" value="image"> 图集</label>
+                    </div>
+                    <!-- 时长（仅作品视图且类型为视频时可用）：多选档位，命中任一所选即显示 -->
+                    <div class="duration-filter-section is-disabled" id="durationFilterSection" style="display:none;" title="仅“视频”类型可按时长筛选">
+                        <span class="label">时长</span>
+                        <label class="filter-item"><input type="checkbox" name="duration" value="le15" disabled> ≤15秒</label>
+                        <label class="filter-item"><input type="checkbox" name="duration" value="s15to60" disabled> 15~60秒</label>
+                        <label class="filter-item"><input type="checkbox" name="duration" value="m1to3" disabled> 1~3分钟</label>
+                        <label class="filter-item"><input type="checkbox" name="duration" value="m3to10" disabled> 3~10分钟</label>
+                        <label class="filter-item"><input type="checkbox" name="duration" value="m10to30" disabled> 10~30分钟</label>
+                        <label class="filter-item"><input type="checkbox" name="duration" value="m30to60" disabled> 30~60分钟</label>
+                        <label class="filter-item"><input type="checkbox" name="duration" value="gt60" disabled> &gt;60分钟</label>
+                        <button class="date-clear" id="durationClear" title="清除时长筛选" style="display:none;">✕</button>
+                    </div>
                 </div>
                 <div class="toolbar-right">
                     <div class="date-filter-section" id="dateFilterSection" style="display:none;">
@@ -229,6 +370,18 @@
                         </span>
                     </div>
                 </div>
+            </div>
+
+            <!-- 话题筛选（可输入的多标签选择器）：输入/候选选择，回车或逗号添加，多个=OR 命中；点卡片话题 chip 也会加入 -->
+            <div class="topic-filter-bar" id="topicFilterBar" style="display:none;">
+                <span class="label">话题</span>
+                <div class="topic-tag-input" id="topicTagInput">
+                    <span class="topic-chips" id="topicChips"></span>
+                    <input type="text" class="topic-input" id="topicInput" list="topicPool" autocomplete="off"
+                           placeholder="输入或选择话题筛选，回车/逗号添加（多个话题=任一命中 OR）">
+                    <datalist id="topicPool"></datalist>
+                </div>
+                <button class="topic-clear" id="topicClear" title="清除全部话题筛选" style="display:none;">✕ 清除</button>
             </div>
 
             <!-- 列表类型 Tab -->

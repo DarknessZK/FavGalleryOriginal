@@ -487,11 +487,13 @@ export class UIStateManager {
                 break;
                 
             case 'completed':
+                // ✅ 已保存：保持按钮可点击（语义 = 点击检查并补全缺失文件），仅复选框维持禁用
                 downloadBtn.innerHTML = '<span style="display: block; text-align: center;">✅ 已保存</span>';
                 downloadBtn.style.background = '#52c41a';
-                downloadBtn.style.cursor = 'default';
-                downloadBtn.disabled = true;
-                
+                downloadBtn.style.cursor = 'pointer';
+                downloadBtn.disabled = false;
+                downloadBtn.title = '已保存，点击检查并补全缺失的文件';
+
                 // ✅ 禁用对应的复选框
                 this.disableWorkCheckbox(workId);
                 break;

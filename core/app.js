@@ -37,6 +37,7 @@ class App {
         // 文件夹选择状态
         this.folderSelected = false;
         this.folderName = null; // ✅ 保存文件夹名称
+        this.accountFolderName = null; // ✅ 账号数据区子目录名（打开本地库引导文案用）
 
         // 加载状态
         this.isLoading = false;
@@ -425,17 +426,25 @@ class App {
 
     /**
      * 显示用户信息
+     * ✅ 容错：未登录/页面拿不到用户信息时 content 会发 null，展示占位提示而非抛错
      */
     displayUserInfo(userInfo) {
         const userInfoEl = document.getElementById('userInfo');
         if (!userInfoEl) return;
 
+        if (!userInfo || !userInfo.uid) {
+            userInfoEl.innerHTML = `
+                <div style="font-size: 13px; color: #999;">⚠️ 未获取到登录用户信息，请确认已登录抖音并刷新页面</div>
+            `;
+            return;
+        }
+
         userInfoEl.innerHTML = `
             <div style="font-size: 13px; line-height: 1.8;">
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
-                    <div><strong>昵称:</strong> ${escapeHtml(userInfo.nickname)}</div>
-                    <div><strong>关注数:</strong> ${userInfo.followingCount}</div>
-                    <div><strong>点赞数:</strong> ${userInfo.favoritingCount}</div>
+                    <div><strong>昵称:</strong> ${escapeHtml(userInfo.nickname || '未知用户')}</div>
+                    <div><strong>关注数:</strong> ${userInfo.followingCount ?? 0}</div>
+                    <div><strong>点赞数:</strong> ${userInfo.favoritingCount ?? 0}</div>
                     <div><strong>收藏数:</strong> ${userInfo.collectCount || 0}</div>
                 </div>
             </div>
@@ -466,14 +475,22 @@ class App {
         if (data.success) {
             this.folderSelected = true;
             this.folderName = data.path; // ✅ 保存文件夹名称
+            // ✅ 账号数据区信息（新版 Content 侧携带）：状态栏直接展示数据区目录名
+            this.accountFolderName = data.account ? (data.account.folderName || null) : null;
+            const accountLabel = data.account && data.account.folderName
+                ? `<div style="color: #1890ff; margin-top: 2px;">👤 ${escapeHtml(data.account.folderName)}</div>`
+                : '';
             folderStatus.innerHTML = `
                 <div style="color: #52c41a;">
                     ✅ 已选择: ${data.path}
                 </div>
+                ${accountLabel}
             `;
 
             // ✅ UI 日志
-            logToUI('info', `✅ 已选择文件夹: ${data.path}`);
+            logToUI('info', data.account && data.account.folderName
+                ? `✅ 已选择文件夹: ${data.path}（账号数据区: ${data.account.folderName}）`
+                : `✅ 已选择文件夹: ${data.path}`);
 
             // ✅ 通知 FileLogger 已选择文件夹
             import('../utils/file-logger.js').then(({ default: fileLogger }) => {
@@ -487,6 +504,7 @@ class App {
         } else {
             this.folderSelected = false;
             this.folderName = null;
+            this.accountFolderName = null;
             folderStatus.innerHTML = `
                 <div style="color: #ff4d4f;">
                     ❌ 选择失败: ${data.error}

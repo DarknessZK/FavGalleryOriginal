@@ -3,7 +3,9 @@
 // 职责：跟踪作者下载状态、更新按钮UI、管理多作者并发
 // ==========================================
 
-import { createLogger } from '../utils/logger.js';
+import { createLogger, logToUI } from '../utils/logger.js';
+// ✅ 已知作品总数（分母）口径与卡片渲染、批量选择共用同一纯函数模块
+import { toCount, computeKnownWorkCount } from '../utils/author-completion.js';
 
 const logger = createLogger('AuthorDownloadManager');
 
@@ -205,7 +207,14 @@ export class AuthorDownloadManager {
             if (!status) return;
 
             const downloadedCount = status.downloadedCount || 0;
-            const workCount = Math.max(author.workCount || 0, status.workCount || 0);
+            // ✅ 有清单数据时以 relations 去重统计为权威值（可修正历史上被平台计数污染的旧值），
+            //    无清单数据时保留本地值并不低于已存数（消除“已存 9/8”倒挂）
+            const workCount = computeKnownWorkCount({
+                relationCount: status.workCount,
+                cachedWorkCount: author.workCount,
+                apiWorkCount: author.platformWorkCount,
+                downloadedCount
+            });
             if (author.downloadedCount === downloadedCount && author.workCount === workCount) return;
 
             author.downloadedCount = downloadedCount;
@@ -280,8 +289,8 @@ export class AuthorDownloadManager {
 
         const downloadButtons = listEl.querySelectorAll('.download-btn');
         downloadButtons.forEach(btn => {
-            // ✅ 只启用未下载完成的按钮
-            if (!btn.textContent.includes('✅')) {
+            // ✅ 恢复所有可操作按钮（完成态也已恢复为可点，用于下次检查更新；仅无作品作者保持禁用）
+            if (!btn.classList.contains('empty')) {
                 btn.disabled = false;
                 btn.style.opacity = '1';
                 btn.style.cursor = 'pointer';
@@ -427,6 +436,12 @@ export class AuthorDownloadManager {
         });
 
         try {
+            // ✅ 分母单调不减：断网/重试耗尽时 AUTHOR_WORKS_COUNT 不会送达，
+            //    authorData.workCount 停留在初始值 0，不可用这种不可信单次拉取覆盖本地已知总数
+            //    （主库侧 content 合并已有保护，此处补内存与显示层，实验 H 实测复现）
+            const memAuthor = (this.app.followingManager?.allAuthors || []).find(a => a.uid === uid);
+            const knownWorkCount = Math.max(toCount(authorData.workCount), toCount(memAuthor?.workCount));
+
             // ✅ 通过 postMessage 通知 Content Script 更新状态
             let status, downloadedCount;
             
@@ -437,7 +452,8 @@ export class AuthorDownloadManager {
                 logger.info(`[AuthorDownload] ⚠️ 作者作品保存中断: ${authorData.nickname} (${downloadedCount}/${authorData.workCount})`);
             } else {
                 status = 'completed';
-                downloadedCount = authorData.workCount;
+                // ✅ 分子取真实累计成功数（旧实现直接拿分母赋值，会把下载失败的作品虚报为已保存）
+                downloadedCount = authorData.downloadedCount;
                 
                 logger.info(`[AuthorDownload] ✅ 作者作品保存完成: ${authorData.nickname} (${downloadedCount}/${authorData.workCount})`);
             }
@@ -448,7 +464,7 @@ export class AuthorDownloadManager {
                 
                 if (authorIndex !== -1) {
                     this.app.followingManager.allAuthors[authorIndex].downloadedCount = downloadedCount;
-                    this.app.followingManager.allAuthors[authorIndex].workCount = authorData.workCount;
+                    this.app.followingManager.allAuthors[authorIndex].workCount = knownWorkCount;
                     
                     logger.info(`[AuthorDownload] ✅ 已同步更新内存中的作者数据: ${uid}`);
                     
@@ -457,18 +473,18 @@ export class AuthorDownloadManager {
                         this.updateAuthorButtonSuccess(authorData);
                         logger.info(`[AuthorDownload] 🎨 已通过 button 引用更新UI: ${uid}`);
                     } else {
-                        // 降级方案：通过 UID 查找
-                        this.updateAuthorCardUI(uid, status, downloadedCount, authorData.workCount);
+                        // 降级方案：通过 UID 查找（同样用校正后的分母，避免显示层回落 0）
+                        this.updateAuthorCardUI(uid, status, downloadedCount, knownWorkCount);
                     }
                 }
             }
             
             // ✅ 同步刷新卡片统计行“🎬 已存 X/Y 作品”（与按钮独立，需单独更新）
-            this.updateAuthorSavedCount(uid, downloadedCount, authorData.workCount);
+            this.updateAuthorSavedCount(uid, downloadedCount, knownWorkCount);
 
             // ✅ 持久化到 Content 主库（消息桥接；旧实现直写 Sidebar 影子库，刷新后必丢）
             this._persistAuthorStatsToContent({
-                [uid]: { downloadedCount, workCount: authorData.workCount }
+                [uid]: { downloadedCount, workCount: knownWorkCount }
             });
         } catch (error) {
             logger.error('[AuthorDownload] ❌ 更新作者状态失败:', error);
@@ -510,10 +526,10 @@ export class AuthorDownloadManager {
         // 清除所有子元素
         btn.innerHTML = '';
 
-        // 添加成功文字
+        // 添加成功文字（✅ 完成态仍可点击：点击即拉作者清单求差集，发现新作品）
         const textSpan = document.createElement('span');
         textSpan.className = 'btn-text';
-        textSpan.textContent = '✅ 已保存';
+        textSpan.textContent = '✅ 检查更新';
         textSpan.style.cssText = `
             position: relative;
             z-index: 1;
@@ -523,22 +539,20 @@ export class AuthorDownloadManager {
         `;
         btn.appendChild(textSpan);
 
-        // ✅ 更新样式
+        // ✅ 更新样式（不禁用：完成态依旧可点）
         btn.style.position = 'relative';
         btn.style.overflow = 'hidden';
         btn.style.background = '#52c41a';
-        btn.style.cursor = 'default';
-        btn.disabled = true;
+        btn.style.cursor = 'pointer';
+        btn.disabled = false;
+        btn.classList.add('completed');
 
-        // ✅ 同时禁用对应的复选框
+        // ✅ 取消勾选（本批已处理完），但保持可勾选，便于下次批量检查更新
         const uid = authorData.uid;
         const checkbox = document.querySelector(`.author-checkbox[data-uid="${uid}"]`);
         if (checkbox) {
-            checkbox.disabled = true;
             checkbox.checked = false;
-            checkbox.style.cursor = 'not-allowed';
-            checkbox.style.opacity = '0.5';
-            logger.info('[AuthorDownload] ✅ 已禁用作者复选框:', uid);
+            logger.info('[AuthorDownload] ☑️ 已取消作者勾选（保持可选）:', uid);
         }
     }
 
@@ -549,6 +563,68 @@ export class AuthorDownloadManager {
      */
     isDownloading(uid) {
         return this.authorDownloads.has(uid);
+    }
+
+    /**
+     * ✅ 处理“下载前单点校验确认已取关”回报（Content 侧已写入软删除标记，此处同步界面与跟踪状态）
+     * 软删除语义：条目保留在列表与表中、已下载作品不动，仅禁止继续下载与勾选
+     * @param {Object} data - { uid, nickname, batchId, reason }
+     */
+    async handleAuthorUnfollowed(data = {}) {
+        const { uid, nickname, reason } = data;
+        if (!uid) return;
+
+        logger.info(`[AuthorDownload] 🚫 收到取关回报: ${nickname || uid}，${reason || '下载前单点校验'}`);
+
+        // ✅ 内存数据标记软删除（重渲染时 resolveAuthorAction/isAuthorSelectable 据此禁用）
+        if (this.app.followingManager && this.app.followingManager.allAuthors) {
+            const author = this.app.followingManager.allAuthors.find(a => a.uid === uid);
+            if (author) {
+                author.isDeleted = true;
+            }
+        }
+
+        // ✅ 移出下载跟踪，按钮就地改为“已取关”
+        const authorData = this.authorDownloads.get(uid);
+        this.authorDownloads.delete(uid);
+        const btn = (authorData && authorData.button)
+            || document.querySelector(`.download-btn[data-uid="${uid}"]`);
+        if (btn) {
+            const progressBar = btn.querySelector('.progress-bar');
+            if (progressBar) progressBar.remove();
+            btn.innerHTML = '<span class="btn-text" style="position:relative;z-index:1;color:white;display:block;text-align:center;">🚫 已取关</span>';
+            // ✅ 带 empty 类：enableAllDownloadButtons 会跳过它，批次结束后仍保持禁用
+            btn.className = 'download-btn empty';
+            btn.disabled = true;
+            btn.style.background = '#bfbfbf';
+            btn.style.opacity = '1';
+            btn.style.cursor = 'not-allowed';
+            btn.setAttribute('data-tip', '已取消关注（软删除）：条目与已存作品保留在本地，不再下载新作品；如需清理请到离线浏览页处理');
+        } else {
+            logger.warn(`[AuthorDownload] ⚠️ 未找到已取关作者的下载按钮: ${uid}`);
+        }
+
+        // ✅ 取消并禁用勾选，同步选中计数
+        if (this.app.batchSelectionManager) {
+            const selection = this.app.batchSelectionManager.state?.following;
+            if (selection) selection.selectedAuthorIds.delete(uid);
+            this.app.batchSelectionManager.disableItem('following', uid);
+            this.app.batchSelectionManager.updateBatchSelectionUI('following');
+        }
+
+        logToUI('warning', `🚫 ${nickname || uid} 已取消关注：跳过下载，已标记软删除（条目保留在列表）`);
+
+        // ✅ 收尾沿用 finishAuthorDownload 的 finally 范式：无人在下载时恢复全局状态，
+        //    避免批量批次因被跳过的作者没有完成回报而卡在“保存中”
+        if (this.authorDownloads.size === 0) {
+            this.enableAllDownloadButtons();
+
+            if (this.app.uiStateManager) {
+                this.app.uiStateManager.setDownloadingState(false);
+            }
+
+            logger.info('[AuthorDownload] ✅ 本批已全部结束（含取关跳过），已恢复按钮状态');
+        }
     }
 
     /**
@@ -573,11 +649,12 @@ export class AuthorDownloadManager {
         const downloadBtn = authorCard.querySelector('.download-btn');
         if (downloadBtn) {
             if (status === 'completed') {
+                // ✅ 完成态：绿色、可点（点击检查是否有新作品）
                 downloadBtn.className = 'download-btn btn completed';
-                downloadBtn.innerHTML = '<span class="btn-text">✅ 已保存</span>';
-                downloadBtn.disabled = true;
+                downloadBtn.innerHTML = '<span class="btn-text">✅ 检查更新</span>';
+                downloadBtn.disabled = false;
                 downloadBtn.style.opacity = '1';
-                downloadBtn.style.cursor = 'not-allowed';
+                downloadBtn.style.cursor = 'pointer';
             } else if (status === 'partial') {
                 downloadBtn.className = 'download-btn btn partial';
                 downloadBtn.innerHTML = `<span class="btn-text">⚠️ ${downloadedCount}/${workCount}</span>`;
@@ -589,12 +666,11 @@ export class AuthorDownloadManager {
             logger.info(`[AuthorDownload] 🎨 已更新作者卡片UI: ${uid} -> ${status}`);
         }
         
-        // 更新复选框（禁用并取消勾选）
+        // 更新复选框（取消勾选但保持可选）
         const checkbox = authorCard.querySelector('.author-checkbox');
         if (checkbox && status === 'completed') {
-            checkbox.disabled = true;
             checkbox.checked = false;
-            logger.info(`[AuthorDownload] ☑️ 已禁用并取消勾选复选框: ${uid}`);
+            logger.info(`[AuthorDownload] ☑️ 已取消作者勾选（保持可选）: ${uid}`);
         }
     }
 

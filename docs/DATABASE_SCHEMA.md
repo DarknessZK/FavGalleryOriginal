@@ -79,9 +79,19 @@ IndexedDB (主存储)
 
 ### 2.3 数据库配置
 
-**数据库名称：** FavGallery  
-**数据库版本：** 1  
+**数据库版本：** 1
 **对象存储数量：** 9 张表
+
+**数据库名称（v1.1 起按账号动态命名，不再是固定名）：**
+
+| 场景 | 库名 | 说明 |
+|------|------|------|
+| 已绑定抖音账号 | `FavGallery_<uid>` | `uid` 为页面直取的当前登录账号纯数字 uid |
+| 未绑定账号（默认态） | `FavGallery_guest` | 兜底库，仅存全局偏好（如 `sidebar_mode`）；业务读写受守卫拦截，不落兜底库 |
+
+- **实现位置**：`utils/account-context.js#buildDbName` 生成库名；`data/database/database.js#useAccount(uid)` 在 `selectFolder` 流程里被调用（早于 `fileSystem.init()`，避免多余开一次兜底库），只改名不重新开库，真正的打开由现有 `_transaction → init()` 自动完成
+- **隔离目的**：与本地文件系统的账号数据区子目录（见 [FILE_SYSTEM_STRUCTURE.md](./FILE_SYSTEM_STRUCTURE.md) 1.1）同步隔离，避免同一浏览器 Profile 下切换抖音账号后，新账号读到旧账号的 IndexedDB 数据
+- **不做旧库兼容/迁移**：项目未上线，历史上固定名为 `FavGallery` 的旧库无需处理，开发机直接删除重建即可
 
 ---
 
@@ -166,6 +176,8 @@ isDeleted: false
 - createTime 使用秒级时间戳，便于按季度分片备份
 - author 嵌套对象只存储必要字段，完整作者信息存储在 authors 表
 - isDeleted 支持软删除：平台侧取消点赞/移出收藏夹后，刷新列表时由 `_mergeItems` 标记，不物理删除记录
+- **话题标签（`#xxx`）不单列字段、不单独存表**：作品描述 `desc` 里的抖音话题（如 `#英文翻唱 #女生翻唱`）100% 可从 `desc` 派生，按“最小冗余”原则不在 works 落库。需要时在消费端用正则从 `desc` 实时提取为 `topics: string[]`（侧边栏筛选）；离线页因无 IndexedDB，在生成展示记录（`data/export/offline-record-builder.js#buildWorkRecord`）时把提取结果固化进 `topics` 字段，属**消费侧派生缓存**，不改变主库结构。列表接口不含结构化话题；`aweme_detail.text_extra`（精确话题）仅单作品详情接口返回，MVP 不依赖它
+- **`video.play_addr` 为瞬态字段、落库前主动剥离（故本表不文档化该列）**：归一化 `_extractVideo`（`utils/platform-helpers.js`）会从平台 `play_addr`/`bit_rate` 提取带签名的临时直链放入 `video.play_addr.url_list[0]`，但 `data/storage/works-manager.js#_sanitizeWorkForStorage` 在 `save('works')` 前 `delete sanitized.video.play_addr`——因为抖音直链会过期且绑 UA/Referer/防盗链，持久化无意义。下载链路（`download/single-downloader.js#downloadVideo`）每次都从**实时获取的作品详情**现取 `play_addr`、不读库内该字段；离线页 `buildWorkRecord` 亦不带上它。因此离线页只能播放“已下载到本地”的媒体属合理边界（签名直链既过期又需联网，无法用于离线回放）
 
 ---
 
@@ -242,9 +254,9 @@ createdAt: 1713801600000
 - 支持任意实体类型的多对多关系，无需为每种关系创建独立表
 - 唯一索引防止同一关系被重复插入
 - 不存储 extra 字段，遵循最小化原则，未来需要时通过数据库升级添加
-- **删除策略（两套机制，追溯需求不同）**：
+- **删除策略（仅机制一 · 平台驱动软删除）**：
   - **机制一 · 平台驱动软删除（已实现）**：平台侧取消点赞/取关/移出收藏夹后，刷新列表时给**实体**（works/authors/collects）打 `isDeleted=true`，relations 边保持不变（只插入不删除），以便追溯与恢复。
-  - **机制二 · 用户主动本地删除（预留，未实现，优先级低）**：用户在界面删除已下载作品时，用 `removeRelation` **物理删除**对应关系边，并**同步删除 `completed_works` 记录**（保留 works 元数据与本地物理文件），以便日后重新下载。此机制无需追溯"曾经收藏过"，故不走 isDeleted、也不让 relations 表冗余。
+  - **机制二 · 用户主动本地删除（已废弃，v2026-09-29）**：曾预留“界面删除已下载作品 → `removeRelation` 物理删对应关系边 + 同步删 `completed_works` 单条”。经评估废弃——用户只会物理删除本地文件，不会精准清理 completed_works 某一条；即便误删整表也有备份还原兜底，且本地文件从不从库还原、库也从不从本地文件还原，两侧互不污染、基本不会出问题。“删了本地想再补回”的真实场景已由**校验补全**（见 FEATURE_COMPLETENESS.md 第 40 条）覆盖。据此删除 `data/database/relation-manager.js` 的预留件 `hasRelation`（Grep 确认无任何调用方的死代码）。
   - 注：relations 表**不设 isDeleted 字段**；"失效关系"语义由实体表的 isDeleted 承载。
 
 ---
@@ -265,9 +277,12 @@ createdAt: 1713801600000
 | avatarUrl | string | 是 | 头像URL |
 | followingCount | number | 是 | 关注数 |
 | followerCount | number | 是 | 粉丝数 |
-| workCount | number | 是 | 作品数（缓存字段） |
+| workCount | number | 是 | 已知作品总数（分母，缓存字段，口径见下方设计说明） |
 | downloadedCount | number | 是 | 已下载作品数（缓存字段，默认 0） |
-| isDeleted | boolean | 是 | 软删除标记（默认 false） |
+| isDeleted | boolean | 是 | 软删除标记（默认 false）；确认取关后置 true，条目保留、仅禁止继续下载 |
+| unfollowedAt | number | 否 | 确认取关的时间戳（毫秒级），仅 `isDeleted=true` 时写入 |
+| unfollowReason | string | 否 | 判定依据文本（默认“下载前关注状态单点校验”），落库以便事后核对 |
+| lastCheckedTime | number | 否 | 最近一次确认/核对该作者状态的时间戳（毫秒级）；纯审计字段，当前只在取关标记事务内写入，详见下方设计说明 |
 
 **示例数据：**
 {
@@ -278,13 +293,15 @@ avatarUrl: "https://p.douyin.com/avatar/xxx.jpg",
 followingCount: 683,
 followerCount: 33,
 workCount: 9,
+downloadedCount: 5,
 isDeleted: false
 }
 
 **设计说明：**
-- workCount 为缓存字段，首次从 API 获取，后续通过 relations 表统计更新
-- isDeleted 支持软删除，取消关注时不物理删除记录
-- 头像 URL 优先使用最大分辨率（1080 > 720 > origin > large）
+- **workCount（分母）口径——单调不减**：一旦真正拉取过该作者的作品清单（`relations` 表有条目），分母完全由本地全集统计（关系表去重条数）决定，不再参与平台返回的作者作品计数（`apiWorkCount`）——因为作者删作品时平台计数会回落，如果直接覆盖会造成分母倒退、甚至出现分子（已下载数）大于分母的倒挂；只有从未拉取过清单时（新关注、本地无任何关系条目），才退化为用 `max(本地缓存值, 平台计数)` 作为估计值。实现：`utils/author-completion.js#computeKnownWorkCount`、`resolveMergedWorkCount`
+- **完成态不禁用按钮**：`已下载数 == 已知作品总数` 不代表“作者没有新作品”（作者发新作品时本地分母还来不及跟上），因此完成态仍允许点击/勾选，按钮文案为“检查更新”，靠真实拉一次清单求差集来发现新作品。实现：`utils/author-completion.js#resolveAuthorAction`
+- isDeleted 支持机制一平台驱动软删除（详见本文档「表 2：relations」设计说明里的删除策略——仅机制一，机制二已于 v2026-09-29 废弃），确认取关时不物理删除记录，仅禁下载；写入入口唯一合法来源为 `data/storage/authors-manager.js#markAuthorsUnfollowed`（必须整条合并写回，不能只传部分字段，否则 `save` 的 put 语义会丢失昵称/头像等基础数据）；是否有权判定“已取关”的准入门槛见下方 5.6 软删除授权策略
+- **`unfollowedAt`/`unfollowReason`/`lastCheckedTime` 均为纯审计字段**：全仓库无任何代码读取它们（不展示在侧边栏、不参与离线页逻辑、不做判断依据），仅供人工排查数据库/备份文件时核对。`lastCheckedTime` 不需要接入全量刷新链路（不接是有意决定，不是遗漏）：软删除判定用的是“本轮命中/未命中清单”的集合成员关系（见 5.6），不依赖时间戳比较；真正生效的列表刷新合并逻辑是 `content/services/data-fetcher.js#_mergeItems`，不写这个字段。历史上 `utils/helpers.js` 里曾有一套看似“通用刷新都会打 lastCheckedTime”的 `mergeDataWithCache`/`mergeWorkData`，经排查为全仓库零调用的死代码（与 `_mergeItems` 重复实现），已于 2026-09-28 删除
 
 ---
 
@@ -473,6 +490,13 @@ authorCount: 234
 | key | string | 是 | 配置键（主键） |
 | value | any | 是 | 配置值（任意类型） |
 
+**已知使用的 key：**
+
+| key | 说明 |
+|------|------|
+| `sidebar_mode` | 侧边栏展示模式（全局偏好，未绑定账号时写入兜底库 `FavGallery_guest`） |
+| `account_binding` | 当前数据库所属账号的绑定记录：`{ uid, nickname, folderName, boundAt }`，`selectFolder` 成功后 fire-and-forget 写入对应账号库 |
+
 **示例数据：**
 {
 key: "theme",
@@ -521,6 +545,18 @@ value: "dark"
 | 720p | 720P 标清 | 视频下载 |
 | origin | 原始画质 | 视频/图片下载 |
 | large | 大图 | 封面/头像下载 |
+
+### 4.5 FOLLOW_STATE（关注状态三态判定，下载链路专用）
+
+用于 `api/douyin/api.js#getAuthorFollowStatus`：下载前对单个作者做关注状态单点取证（不依赖关注清单完整性），解析实现见 `utils/follow-verification.js#parseFollowState`。
+
+| 枚举值 | 说明 | 对应处理 |
+|--------|------|---------|
+| following | `follow_status = 1`，确认仍关注 | 正常下载 |
+| unfollowed | `follow_status = 0`，确认已取关 | 触发机制一软删除（`markAuthorsUnfollowed`） |
+| unknown | 请求失败 / 字段缺失 / 取值不在已知枚举内 | **不拦截、不改判**：照常下载且不下软删除结论，绝不允许走到 `markAuthorsUnfollowed` |
+
+> 三态原则：宁可漏判不可误判。“拿不到结论”不能当成“已取关”，否则一旦接口抽风就会把一堆正常关注的作者误标为失效。
 
 ---
 
@@ -673,6 +709,38 @@ const collectIds = relations
 
 ---
 
+### 5.6 软删除授权策略（机制一的准入门槛）
+
+软删除是“平台驱动”的结论——只有当我们确实在本轮看到了**完整清单**时，才有资格说“某条目不在清单里 = 用户取消了它”。任何失败、截断、未到底的情况，一律视为“本轮没检测到变化”，绝不下删除结论（宁可漏检，不可误删；误删会让已保存的本地内容从离线页成批消失）。
+
+**刷新列表链路（批量判定的前提）：**判定本轮是否有权对“本轮 API 窗口之外”的缓存条目标记 `isDeleted`，证据三要素（实现：`utils/soft-delete-policy.js#resolveSoftDeletePolicy`）：
+
+| 证据 | 为真/为假时的含义 |
+|------|-------------------|
+| `partial === true` | 本轮存在重试耗尽仍失败的情况，清单不可信 → **拒绝授权** |
+| `apiItemCount === 0` | 本轮一条都没拿到，空结果不能作为“全部已取消”的证据（接口异常同样表现为空）→ **拒绝授权** |
+| `sawEnd !== true` | 未确认到底（被 `maxCount` 截断或提前停止），只看到了窗口，不能对窗口外下结论 → **拒绝授权** |
+| 三者均通过 | 已确认清单到底 → 放行，`applyOutOfWindowDisposition` 把窗口外条目设为 `isDeleted: true`（拒绝授权时原样保留既有状态，既不下新结论也不撤销旧结论） |
+
+**下载链路（单点取证）：**不依赖上述批量证据，改为下载前对单个作者调 `getAuthorFollowStatus`（见 4.5 FOLLOW_STATE）拿实时结论，只有明确为 `unfollowed` 才触发 `markAuthorsUnfollowed`；`unknown` 不影响下载、不下判定。
+
+---
+
+### 5.7 标签体系存储决策（设计备忘，未实现代码）
+
+标签分**两类**，职责与存储策略完全不同（背景：侧边栏=下载作品，离线浏览页=管理已下载作品；“管理”语义的标签均归离线页）：
+
+| 类型 | 来源 | 读写 | 是否存表 | 落点 |
+|------|------|------|---------|------|
+| **话题标签** | `desc` 里的 `#xxx`，创作者自加 | 只读、可派生 | **不存表、不加字段** | 消费端从 `desc` 提取（见【表 1 works】设计说明）；离线页展示/筛选 |
+| **自定义标签** | 用户自建分类（待看/素材等） | 可写、不可派生 | **未来新增 `tags` 表 + 复用 `relations`** | 写落扩展侧主库（唯一真实来源），离线页只读 |
+
+- **话题标签（优先实现）**：纯派生、零回写，放离线页几乎不增加复杂度（生成时固化 `topics` + 筛选加一维）。
+- **自定义标签（优先度极低，未来单独排期）**：需持久化。届时新增一张轻量 `tags` 表承载标签本体（`tagId`/`name`/`color`/`isDeleted`），作品↔标签的多对多复用现有 **relations** 通用关系表（`sourceType='work'`、`targetType='tag'`），与 5.1 预留一致。
+- **为何不自定义标签也放离线页写**：离线页是 file:// 静态页，无 IndexedDB、无回写通道，字段均为生成时从主库固化。在离线页内直接编辑会触发架构级改动（本地持久化 + 回传主库 + 防重生成覆盖），故定“扩展写、离线页读”。
+
+---
+
 ## 6. 数据流转图
 
 ### 6.1 列表加载流程
@@ -776,6 +844,29 @@ gzip 压缩大表（works、relations）
 - 最小冗余：可推导的状态不单独存储
 - 通用化：避免平台特定术语
 - 可扩展：支持未来新增实体类型和关系类型
+
+---
+
+### v1.1（2026-09-28）
+
+**本轮变更（账号隔离 + 软删除口径完善）：**
+
+1. **数据库名称按账号动态化**（见 2.3）：从固定名 `FavGallery` 改为 `FavGallery_<uid>`（已绑定）/ `FavGallery_guest`（未绑定兜底），与文件系统的账号数据区子目录（`FavGallery(昵称)[uid]`）同步隔离；不做旧库兼容/迁移
+2. **settings 表新增已知 key**：`account_binding`（账号绑定记录）、`sidebar_mode`（全局偏好，写入兜底库）
+3. **authors 表新增字段**：`unfollowedAt`、`unfollowReason`、`lastCheckedTime`（仅在确认取关触发 `markAuthorsUnfollowed` 时与 `isDeleted` 同一事务写入）
+4. **workCount 口径重写**：明确为“已知作品总数（分母），单调不减”，与平台计数的关系仅保留在“从未拉取过清单”的兜底场景（见 3.表 3、`utils/author-completion.js`）
+5. **新增 4.5 FOLLOW_STATE 枚举**：下载链路单点取证的三态判定（following/unfollowed/unknown），unknown 绝不触发软删除
+6. **新增 5.6 软删除授权策略**：刷新链路的批量判定必须先满足 `sawEnd && !partial && apiItemCount>0` 三个证据，否则不得对窗口外条目下结论（`utils/soft-delete-policy.js`）
+
+---
+
+### v1.2（2026-09-29）
+
+**本轮变更（标签体系设计备忘，未实现代码）：**
+
+1. 明确“话题标签不单独存表/不加字段”，由 `desc` 派生（见【表 1 works】设计说明）；消费端（侧边栏筛选/离线页）实时提取 `topics`。
+2. 新增 5.7 标签体系存储决策：话题标签只读派生优先做、放离线页；自定义标签未来用 `tags` 表 + 复用 `relations`，扩展写、离线页读，优先度极低单独排期。
+3. 记录职责划分：侧边栏=下载作品，离线页=管理已下载作品。
 
 ---
 

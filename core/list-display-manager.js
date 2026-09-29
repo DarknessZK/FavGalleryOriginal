@@ -76,6 +76,9 @@ class ListDisplayManager {
         // 初始化 DOM 元素
         likedManager.initElements();
 
+        // ✅ 复位筛选栏 DOM 控件（setData 已归零内部状态并重渲全量，此处同步下拉/输入框，修正“刷新后条件显示残留却不生效”）
+        this.app.eventBinder?.resetFilterControls('liked');
+
         // ✅ 加载完成后填充「作者多选筛选」选项（按需显示）
         this.app.eventBinder?.refreshAuthorFilterOptions('liked', likedManager);
         
@@ -144,6 +147,9 @@ class ListDisplayManager {
 
         // 初始化 DOM 元素
         bookmarkedManager.initElements();
+
+        // ✅ 复位筛选栏 DOM 控件（与点赞列表同理）
+        this.app.eventBinder?.resetFilterControls('bookmarked');
 
         // ✅ 加载完成后填充「作者多选筛选」选项（按需显示）
         this.app.eventBinder?.refreshAuthorFilterOptions('bookmarked', bookmarkedManager);
