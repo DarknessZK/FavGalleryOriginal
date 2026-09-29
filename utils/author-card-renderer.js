@@ -5,6 +5,12 @@
 
 import { escapeHtml } from './ui-helpers.js';
 import { createLogger } from './logger.js';
+import {
+    toCount,
+    computeKnownWorkCount,
+    resolveAuthorAction,
+    getSavedCountTooltip
+} from './author-completion.js';
 
 const logger = createLogger('AuthorCardRenderer');
 
@@ -49,27 +55,26 @@ function createAuthorCardHTML(author, selectedAuthorIds = null) {
     const authorUrl = platformId ? `https://www.douyin.com/user/${platformId}` : '';
     
     // 下载状态（动态计算，不存储 downloadStatus 字段）
-    const downloadedCount = author.downloadedCount || 0;
-    const workCount = author.workCount || 0;
-    
-    // 根据状态设置按钮样式和文本
-    let buttonText = '⬇️ 保存';
-    let buttonStyle = 'background: #1890ff; text-align: center;';
-    let buttonDisabled = false;
-    let buttonClass = 'download-btn';
-    
-    // 优先判断：如果无作品或全部已下载，显示已完成
-    if (workCount === 0 || downloadedCount >= workCount) {
-        buttonText = '✅ 已保存';
-        buttonStyle = 'background: #52c41a; cursor: default; text-align: center;';
-        buttonDisabled = true;
-        buttonClass = 'download-btn completed';
-    } else if (downloadedCount > 0) {
-        // 部分下载完成
-        buttonText = `⚠️ ${downloadedCount}/${workCount}`;
-        buttonStyle = 'background: #faad14; text-align: center;';
-        buttonClass = 'download-btn partial';
-    }
+    const downloadedCount = toCount(author.downloadedCount);
+    // ✅ 分母：已知作品总数（口径集中在 author-completion，与批量选择、下载完成回写共用一套规则）
+    const knownWorkCount = computeKnownWorkCount({
+        relationCount: author.relationWorkCount,
+        cachedWorkCount: author.workCount,
+        apiWorkCount: author.platformWorkCount,
+        downloadedCount
+    });
+    // ✅ 操作态：完成态不再禁用按钮与复选框（作者更新作品必须能被“检查更新”发现）；已取关（软删除）优先级最高
+    const action = resolveAuthorAction({
+        knownWorkCount,
+        downloadedCount,
+        platformWorkCount: author.platformWorkCount ?? author.workCount,
+        isDeleted: author.isDeleted
+    });
+
+    const buttonText = action.text;
+    const buttonStyle = `background: ${action.background}; text-align: center;`;
+    const buttonDisabled = !action.clickable;
+    const buttonClass = action.className;
     
     // 检查是否被选中
     const isChecked = selectedAuthorIds && selectedAuthorIds.has(uid);
@@ -88,7 +93,7 @@ function createAuthorCardHTML(author, selectedAuthorIds = null) {
             <input type="checkbox" class="author-checkbox" data-uid="${uid}" 
                 style="margin-right: 0; cursor: pointer;"
                 ${isChecked ? 'checked' : ''}
-                ${buttonDisabled ? 'disabled' : ''}>
+                ${action.selectable ? '' : 'disabled'}>
             ${avatarUrl ? `
                 <img src="${avatarUrl}" style="width: 80px; height: 100px; object-fit: cover; border-radius: 4px;" />
             ` : `
@@ -111,7 +116,7 @@ function createAuthorCardHTML(author, selectedAuthorIds = null) {
                     <span style="color: #d9d9d9;">|</span>
                     <span style="white-space: nowrap;">👤${formatNumber(followingCount)}关注</span>
                     <span style="color: #d9d9d9;">|</span>
-                    <span style="white-space: nowrap;">🎬已存<span class="author-saved-count">${author.downloadedCount || 0}/${formatNumber(workCount)}</span><span class="author-tip-icon" data-tip="已保存作品数 / 作品总数。总数取自抖音关注列表接口，可能略少于作者主页实际作品数；完成下载后会以实际下载数量校正。" style="display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;margin-left:3px;border-radius:50%;border:1px solid #bbb;color:#999;font-size:10px;line-height:1;vertical-align:middle;flex-shrink:0;">?</span></span>
+                    <span style="white-space: nowrap;">🎬已存<span class="author-saved-count">${downloadedCount}/${knownWorkCount}</span><span class="author-tip-icon" data-tip="${escapeHtml(getSavedCountTooltip())}" style="display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;margin-left:3px;border-radius:50%;border:1px solid #bbb;color:#999;font-size:10px;line-height:1;vertical-align:middle;flex-shrink:0;">?</span></span>
                 </div>
                 <div style="margin-top: 8px; display: flex; gap: 4px; align-items: center;">
                     ${authorUrl ? `
@@ -131,7 +136,7 @@ function createAuthorCardHTML(author, selectedAuthorIds = null) {
                             box-sizing: border-box;
                         ">🔗 主页</a>
                     ` : ''}
-                    <button class="${buttonClass}" data-uid="${uid}" 
+                    <button class="${buttonClass}" data-uid="${uid}" data-tip="${escapeHtml(action.tooltip)}"
                         ${buttonDisabled ? 'disabled' : ''}
                         style="
                             padding: 4px 6px;
@@ -140,7 +145,7 @@ function createAuthorCardHTML(author, selectedAuthorIds = null) {
                             color: white;
                             border: none;
                             border-radius: 4px;
-                            cursor: ${buttonDisabled ? 'default' : 'pointer'};
+                            cursor: ${action.cursor};
                             font-size: 12px;
                             text-align: center;
                             display: inline-block;

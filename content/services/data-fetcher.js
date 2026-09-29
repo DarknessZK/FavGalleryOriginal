@@ -11,6 +11,9 @@ import { backupManager } from '../../data/backup/backup-manager.js';
 import * as relationManager from '../../data/database/relation-manager.js';
 import { database } from '../../data/database/database.js';
 import { ListConfigFactory } from './list-config-factory.js';
+import { resolveMergedWorkCount } from '../../utils/author-completion.js';
+import { resolveSoftDeletePolicy, applyOutOfWindowDisposition } from '../../utils/soft-delete-policy.js';
+import { resolveTruncation } from '../../utils/worklist-truncation.js';
 
 const logger = createLogger('DataFetcher');
 
@@ -155,12 +158,38 @@ export class DataFetcher {
         // 5. 合并数据（支持软删除，以 API 顺序为准）
         // ✅ smartIncrementalFetch 返回完整的新→旧窗口（含缓存命中项），
         // 合并后自然保持 API 排序（点赞列表按点赞时间，而非作品发布时间），不能按 createTime 排序
-        const mergedData = this._mergeItems(cachedItems, apiItems, config.idField, config);
+        //
+        // ✅ 软删除授权：只有本轮确认看到清单到底，才有权把窗口外的缓存条目标为平台侧已取消；
+        //    接口失败、达到加载上限截断、提前停止等情形一律视为“本次没检测到变化”，宁可漏检不可误删
+        const softDeletePolicy = resolveSoftDeletePolicy({
+            sawEnd: apiResult.sawEnd,
+            apiItemCount: apiItems.length,
+            partial: apiResult.partial
+        });
+        logger.info(`🔍 [软删除判定] ${softDeletePolicy.allow ? '已授权' : '已跳过'}: ${softDeletePolicy.reason}`);
+
+        const mergedData = this._mergeItems(cachedItems, apiItems, config.idField, config, softDeletePolicy.allow);
         
         // ✅ 按 maxCount 截断：批次粒度会超额拉取，超出目标量的旧数据不进列表
         const effectiveMaxCount = extraParams.maxCount || config.maxCount;
         const cappedData = mergedData.slice(0, effectiveMaxCount);
         logger.info(`✅ 合并后共 ${cappedData.length} 个${config.saveKey === 'collects' ? '收藏夹' : config.saveKey === 'authors' ? '作者' : '作品'}（合并 ${mergedData.length} 个，上限 ${effectiveMaxCount}）`);
+
+        // ✅ 挂载截断标注（数组属性，不影响既有 slice/迭代消费）：
+        //    与软删除授权（上方 resolveSoftDeletePolicy）是两套独立判定——这里只产出“给用户提示清单不全”的展示信号，
+        //    不改变任何落库结论。未命中上限/已到底 → truncated=false，下游自行忽略
+        const truncation = resolveTruncation({
+            sawEnd: apiResult.sawEnd,
+            partial: apiResult.partial,
+            hasMore: apiResult.hasMore,
+            loadedCount: cappedData.length,
+            maxCount: effectiveMaxCount
+        });
+        cappedData.truncated = truncation.truncated;
+        cappedData.maxCount = effectiveMaxCount;
+        if (truncation.truncated) {
+            logger.warn(`⚠️ [截断标注] 本轮仅加载 ${cappedData.length} 个（上限 ${effectiveMaxCount}）：${truncation.reason}`);
+        }
         
         // 6. 保存数据（配置驱动）
         await this._saveList(listType, {
@@ -265,9 +294,10 @@ export class DataFetcher {
      * @param {Array} api - API数据
      * @param {string} idField - ID字段名（配置驱动）
      * @param {Object} config - 列表配置（可选，用于按类型定制合并策略）
+     * @param {boolean} allowSoftDelete - 是否授权软删除（本轮已确认清单到底），默认不授权（安全默认：新增调用方漏传时只会漏检，不会误删）
      * @returns {Array} 合并后的数据
      */
-    _mergeItems(cached, api, idField, config = {}) {
+    _mergeItems(cached, api, idField, config = {}, allowSoftDelete = false) {
         const cachedMap = new Map();
         cached.forEach(item => {
             cachedMap.set(item[idField], item);
@@ -296,23 +326,26 @@ export class DataFetcher {
                 mergedItem.avatarUrl = item.avatarUrl;
                 mergedItem.followerCount = item.followerCount;
                 mergedItem.followingCount = item.followingCount;
-                // workCount：仅当该作者已下载过（downloadedCount>0，此时为 relations 精确值）才保留缓存，
-                // 否则采用 API 最新 aweme_count（作者新发布作品后总数才能及时更新）
-                if (!(cachedItem.downloadedCount > 0)) {
-                    mergedItem.workCount = item.workCount;
-                }
+                // ✅ workCount（已知作品总数）：本地已有值时不被平台计数覆盖
+                //    关注列表接口只带计数不带清单，且作者删作品会让平台计数回落（直接采用会造成“已存 9/8”倒挂）；
+                //    真正的全集统计由 QUERY_AUTHORS_STATUS_BATCH 按 relations 去重数回写校正（见 applyAuthorStatuses）
+                mergedItem.workCount = resolveMergedWorkCount({
+                    cachedWorkCount: cachedItem.workCount,
+                    apiWorkCount: item.workCount
+                });
             }
             
             merged.push(mergedItem);
         });
         
-        // ✅ 仅在缓存中的数据（本次 API 窗口未覆盖）追加到末尾，并标记软删除
+        // ✅ 仅在缓存中的数据（本次 API 窗口未覆盖）追加到末尾
+        //    获得授权时标为已删除；未授权时原样保留（既不新下结论，也不撤销旧的删除结论）
         cached.forEach(item => {
             if (!apiIds.has(item[idField])) {
-                if (!item.isDeleted) {
+                if (allowSoftDelete && !item.isDeleted) {
                     logger.debug(`🗑️ 标记为已删除: ${item[idField]}`);
                 }
-                merged.push({ ...item, isDeleted: true });
+                merged.push(applyOutOfWindowDisposition(item, allowSoftDelete));
             }
         });
         

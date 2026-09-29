@@ -75,7 +75,7 @@ export class BatchDownloadManager {
                 failed: 0
             };
 
-            logger.info(`🚀 开始批量下载: ${workIds.length} 个作品`);
+            logger.info(`🚀 开始${workIds.length > 1 ? '批量下载' : '下载'}: ${workIds.length} 个作品`);
 
             const results = [];
 
@@ -173,7 +173,7 @@ export class BatchDownloadManager {
             // 结束批次
             this.end();
 
-            logger.info(`✅ 批量下载完成: 成功 ${this.progress.success}, 失败 ${this.progress.failed}`);
+            logger.info(`✅ ${this.progress.total > 1 ? '批量下载' : '下载'}完成: 成功 ${this.progress.success}, 失败 ${this.progress.failed}`);
 
             return {
                 batchId: this.batchId,

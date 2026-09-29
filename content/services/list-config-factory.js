@@ -70,7 +70,13 @@ export class ListConfigFactory {
                             params.maxCount,
                             params.onProgress
                         );
-                        return { works };
+                        return {
+                            works,
+                            // ✅ 透传清单完整性证据（api 层以数组属性形式携带）
+                            sawEnd: works?.sawEnd === true,
+                            partial: works?.partial === true,
+                            hasMore: works?.hasMore === true
+                        };
                     },
                     cacheLoad: (fs, extraParams) => worksManager.loadAuthorWorks(fs, extraParams.uid),
                     cacheSave: (fs, data) => worksManager.saveAuthorWorks(fs, {

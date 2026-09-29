@@ -570,6 +570,22 @@ export const CONFIG = {
 };
 
 /**
+ * ✅ 视频时长筛选档位（侧边栏“时长”多选下拉的单一数据源）
+ * 单位：毫秒，与 works.video.duration 一致（卡片渲染以 duration/1000 显示秒）。
+ * 区间为“左开右闭”(min < d <= max)，首档含 0（无时长作品 duration 缺省为 0，归入 ≤15秒）；
+ * 末档 max=Infinity 表示无上界。任一时长按此划分唯一落档，档位间无重叠、无遗漏。
+ */
+export const DURATION_BUCKETS = [
+    { key: 'le15',    label: '≤15秒',    min: 0,       max: 15000 },
+    { key: 's15to60', label: '15~60秒',  min: 15000,   max: 60000 },
+    { key: 'm1to3',   label: '1~3分钟',  min: 60000,   max: 180000 },
+    { key: 'm3to10',  label: '3~10分钟', min: 180000,  max: 600000 },
+    { key: 'm10to30', label: '10~30分钟', min: 600000,  max: 1800000 },
+    { key: 'm30to60', label: '30~60分钟', min: 1800000, max: 3600000 },
+    { key: 'gt60',    label: '>60分钟',  min: 3600000, max: Infinity },
+];
+
+/**
  * 获取指定平台的 API 端点配置
  * @param {string} platform - 平台名称（默认为当前激活平台）
  * @returns {Object} 平台特定的 API 端点配置

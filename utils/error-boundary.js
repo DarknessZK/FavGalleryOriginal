@@ -21,13 +21,18 @@ let activeBoundary = null;
  * @param {Object} options
  * @param {string} [options.context] - 上下文标识（'Sidebar' | 'Content'，仅日志用）
  * @param {Function} [options.onError] - 错误回调 ({ message, count, error, source }) => void
+ * @param {Function} [options.filter] - 上报过滤器 (error, source, filename) => boolean，返回 false 则整体忽略
+ *        （不进入去重表、不触发 onError）。用于 Content 侧：main.js 以 <script> 注入页面主世界，
+ *        window 上的 error/unhandledrejection 会连带捕获到宿主站点自己的报错（如退出登录时抖音自身
+ *        请求失败抛出的 "Network request failed, status: 0"），与本项目无关，不应打扰用户。
  * @returns {{ reportError: Function }} 边界句柄（含手动上报入口）
  */
-function installErrorBoundary({ context = '', onError } = {}) {
+function installErrorBoundary({ context = '', onError, filter } = {}) {
     /** 去重表：key = 错误文案前缀，value = { message, count, ts } */
     const recent = new Map();
 
-    const report = (error, source) => {
+    const report = (error, source, filename) => {
+        if (filter && !filter(error, source, filename)) return null;
         let message;
         if (error && typeof error === 'object' && (error.stack || error.message)) {
             message = error.stack || error.message;
@@ -56,7 +61,7 @@ function installErrorBoundary({ context = '', onError } = {}) {
 
     if (typeof window !== 'undefined' && window.addEventListener) {
         window.addEventListener('error', (event) => {
-            report(event.error || event.message, 'window.onerror');
+            report(event.error || event.message, 'window.onerror', event.filename);
             // 不调 preventDefault：保留浏览器默认控制台输出
         });
 

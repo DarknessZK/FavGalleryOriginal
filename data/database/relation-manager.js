@@ -5,6 +5,9 @@
 
 import { database } from './database.js';
 import { createLogger } from '../../utils/logger.js';
+import { groupRelationsByTarget } from '../../utils/relation-group.js';
+import { getMonthKey } from '../export/offline-record-builder.js';
+import { markOfflineDirty } from '../export/offline-delta.js';
 
 const logger = createLogger('RelationManager');
 
@@ -36,20 +39,15 @@ export async function batchAddRelations(relations) {
         }));
 
         // ✅ 按 targetType + targetId 分组
-        const groups = new Map();
-        for (const item of items) {
-            const key = `${item.targetType}_${item.targetId}`;
-            if (!groups.has(key)) {
-                groups.set(key, []);
-            }
-            groups.get(key).push(item);
-        }
+        //    旧实现在此处用 key.split('_') 反解目标类型/ID，而 targetId 自身含下划线
+        //    （liked_group / author_group / collect_group），反解错位导致去重永久失效：
+        //    每轮刷新都把已存在的关系当新关系全量重写，并触发 relations 整表备份
+        const groups = groupRelationsByTarget(items);
 
         // ✅ 批量查询每个分组已存在的关系
         const existingIds = new Set();
-        for (const [key, groupItems] of groups) {
-            const [targetType, targetId] = key.split('_');
-            const existingRelations = await getIncomingRelations(targetType, targetId);
+        for (const group of groups.values()) {
+            const existingRelations = await getIncomingRelations(group.targetType, group.targetId);
             existingRelations.forEach(rel => existingIds.add(rel.id));
         }
 
@@ -59,6 +57,9 @@ export async function batchAddRelations(relations) {
         if (newItems.length > 0) {
             await database.save('relations', newItems);
             logger.info(`✅ 批量添加关系: ${newItems.length} 条新关系（跳过 ${items.length - newItems.length} 条已存在）`);
+            // ♻️ 登记离线增量：新关系使作品进入/新增所属分片，flush 时按当前关系反查归属
+            const workIds = newItems.filter(r => r.sourceType === 'work').map(r => r.sourceId);
+            if (workIds.length > 0) markOfflineDirty(workIds);
         } else {
             logger.debug(`ℹ️ 所有关系已存在，无需更新（共 ${items.length} 条）`);
         }
@@ -113,32 +114,26 @@ export async function removeRelation(sourceType, sourceId, targetType, targetId)
     const id = generateRelationId(sourceType, sourceId, targetType, targetId);
 
     try {
+        // ♻️ 删除前先取回关系（拿 createdAt），以便精确记下“从哪个分片桶移除”——
+        //    关系删除后无法再反查所属月份，故必须当场登记
+        const existing = await database.get('relations', id);
         await database.delete('relations', id);
         logger.debug(`🗑️ 删除关系: ${id}`);
+
+        if (existing && existing.sourceType === 'work') {
+            let bucket = null;
+            if (existing.targetType === 'liked_group' && existing.targetId === 'liked') {
+                bucket = { kind: 'liked', key: getMonthKey(existing.createdAt) };
+            } else if (existing.targetType === 'collect') {
+                bucket = { kind: 'collect', key: existing.targetId };
+            } else if (existing.targetType === 'author') {
+                bucket = { kind: 'author', key: existing.targetId };
+            }
+            markOfflineDirty([existing.sourceId], bucket ? [bucket] : []);
+        }
     } catch (err) {
         logger.error(`❌ 删除关系失败: ${id}`, err);
         throw err;
-    }
-}
-
-// ⚠️ 预留功能 - 用于存在性检查
-/**
- * 检查关系是否存在
- * @param {string} sourceType - 来源类型
- * @param {string} sourceId - 来源ID
- * @param {string} targetType - 目标类型
- * @param {string} targetId - 目标ID
- * @returns {Promise<boolean>} 是否存在
- */
-export async function hasRelation(sourceType, sourceId, targetType, targetId) {
-    // TODO: 需要实现 getRelation 或使用其他方式查询
-    // 当前简化实现，未来可优化
-    try {
-        const relations = await getIncomingRelations(targetType, targetId);
-        return relations.some(r => r.sourceType === sourceType && r.sourceId === sourceId);
-    } catch (err) {
-        logger.error(`❌ 检查关系失败`, err);
-        return false;
     }
 }
 
@@ -262,7 +257,6 @@ export default {
     removeRelation,
     getIncomingRelations,
     getOutgoingRelations,      // ✅ 新增：查询出边关系
-    hasRelation,
     getAuthorWorkIds,
     getWorkCollectIds,
     getCollectWorkIds,

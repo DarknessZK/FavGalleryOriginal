@@ -6,6 +6,7 @@
 
 import { CONFIG } from '../../config/constants.js';
 import { sanitizeForFileSystem } from '../../utils/helpers.js';
+import { extractTopics } from '../../utils/topic.js';
 
 /**
  * 解析作品的本地作者目录（相对根目录，形如 抖音/昵称(uid)）
@@ -126,11 +127,16 @@ export function buildWorkRecord(work, completed, sortTime, platform) {
     const record = {
         workId,
         desc: work.desc || '',
+        // ✅ 话题标签：从 desc 派生的只读数据（不单独入主库，见 DATABASE_SCHEMA.md 5.7）；
+        //    离线页无 IndexedDB，故在此固化进展示记录，供卡片显示与话题筛选直接消费
+        topics: extractTopics(work.desc || ''),
         createTime: work.createTime || 0,
         authorUid,
         authorNickname,
         isImagePost: !!work.isImagePost,
         mediaType: completed?.mediaType || (work.isImagePost ? 'image_post' : 'video'),
+        // 视频时长（毫秒）：供离线页“时长”筛选分档；图集/无时长缺省为 0（归入 ≤15秒档）
+        duration: work.video?.duration || 0,
         coverUrl: remoteCover,
         pageUrl: work.video?.pageUrl || '',
         isDownloaded
@@ -170,6 +176,8 @@ export function buildWorkRecord(work, completed, sortTime, platform) {
 
 /**
  * 构建作者展示记录（用于 authors/index.js 作者列表）
+ * ✅ 索引收录 authors 表全部作者（含无作品、已取关的），与扩展内列表保持一致；
+ *    hasShard 由调用方标注（有无作品分片文件），isDeleted 透传供失效项展示与后续清理
  *
  * @param {Object} author - authors 表原始记录
  * @param {Object} status - 下载状态 { downloadStatus, downloadedCount, workCount }
@@ -184,7 +192,8 @@ export function buildAuthorRecord(author, status) {
         followingCount: author.followingCount || 0,
         workCount: status?.workCount || 0,
         downloadedCount: status?.downloadedCount || 0,
-        downloadStatus: status?.downloadStatus || 'pending'
+        downloadStatus: status?.downloadStatus || 'pending',
+        isDeleted: !!author.isDeleted
     };
 }
 

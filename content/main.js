@@ -13,14 +13,39 @@ import { authorWorksLoader } from './services/author-works-loader.js';
 import { AuthorDownloadService } from './services/author-download-service.js';
 import { database } from '../data/database/database.js';
 import { platformAPI } from '../api/platform-adapter.js';
+import { getUserInfoFromPage } from '../api/douyin/helpers.js';
+import {
+    getAccount,
+    setAccount,
+    checkAccountSwitch,
+    buildAccountFolderName,
+    findAccountFolderName
+} from '../utils/account-context.js';
 import { CONFIG } from '../config/constants.js';
 import { userConfig } from '../config/user-config.js';
-import { generateOfflineData } from '../data/export/offline-data-generator.js';
+import { ensureOfflineData, flushOfflineDelta } from '../data/export/offline-delta.js';
 import { generateStaticShell } from '../data/export/offline-shell-generator.js';
 import { installErrorBoundary } from '../utils/error-boundary.js';
 import fileLogger from '../utils/file-logger.js';
 
 const logger = createLogger('ContentScript');
+
+// ✅ 业务消息白名单：需要账号数据区就绪才放行的消息（受 _ensureAccountReady 守卫）
+//    控制类/非业务消息（GET_USER_INFO / SELECT_FOLDER / 侧边栏模式 / 配置面板等）不受拦截
+const BUSINESS_MESSAGE_TYPES = new Set([
+    'LOAD_LIKED_WORKS',
+    'LOAD_LIKED_FROM_CACHE',
+    'LOAD_COLLECTS_LIST',
+    'LOAD_FOLLOWING_AUTHORS',
+    'LOAD_COLLECT_WORKS',
+    'LOAD_AUTHOR_WORKS',
+    'DOWNLOAD_AUTHOR_WORKS',
+    'BATCH_DOWNLOAD_WORKS',
+    'QUERY_AUTHOR_STATUS',
+    'QUERY_AUTHORS_STATUS_BATCH',
+    'UPDATE_AUTHOR_DOWNLOAD_STATS',
+    'GET_DOWNLOADED_WORK_IDS'
+]);
 
 class ContentScript {
     constructor() {
@@ -78,7 +103,13 @@ class ContentScript {
      */
     async handleMessage(event, iframe) {
         if (!event.data || event.data.source !== 'sidebar') return;
-        
+
+        // ✅ 账号数据区守卫：一切业务读写必须先绑定账号且当前登录身份与绑定一致，
+        //    防止切换抖音账号后在新旧数据未隔离的状态下读写串扰（实验教训：新号读旧号数据）
+        if (BUSINESS_MESSAGE_TYPES.has(event.data.type) && !(await this._ensureAccountReady(iframe))) {
+            return;
+        }
+
         switch (event.data.type) {
             case 'GET_USER_INFO':
                 await this.sendUserInfo(iframe);
@@ -101,7 +132,8 @@ class ContentScript {
             
             // ✅ 处理批量下载请求
             case 'BATCH_DOWNLOAD_WORKS':
-                logger.info(`📥 收到批量下载请求: ${event.data.workIds.length} 个作品`);
+                const reqCount = event.data.workIds.length;
+                logger.info(`📥 收到${reqCount > 1 ? '批量下载' : '下载'}请求: ${reqCount} 个作品`);
                 this.handleBatchDownloadWorks(event.data, iframe);
                 break;
             
@@ -287,7 +319,7 @@ class ContentScript {
         const { workIds, folderPath, batchId } = data;
         
         try {
-            logger.info(`🚀 开始批量下载: ${workIds.length} 个作品, batchId: ${batchId}`);
+            logger.info(`🚀 开始${workIds.length > 1 ? '批量下载' : '下载'}: ${workIds.length} 个作品, batchId: ${batchId}`);
             
             // ✅ 检查前置条件
             if (!fileSystem.rootDirectoryHandle) {
@@ -374,15 +406,16 @@ class ContentScript {
                 result: result
             }, '*');
             
-            logger.info(`✅ 批量下载完成: 成功 ${result.progress.success}, 失败 ${result.progress.failed}`);
+            logger.info(`✅ ${workIds.length > 1 ? '批量下载' : '下载'}完成: 成功 ${result.progress.success}, 失败 ${result.progress.failed}`);
             
             // ✅ 清理引用
             this.currentBatchManager = null;
             this.currentBatchId = null;
             
-            // ✅ 下载改变了保存状态与本地媒体，整批完成后异步刷新FavGallery 离线页数据（仅当有成功下载）
+            // ✅ 方案（增量）：下载改变了保存状态/本地媒体，触发一次增量刷写（只重建受影响分片，非全量重写）。
+            //    markOfflineDirty 已在 markAsDownloaded 处登记，本处仅驱动合并写盘；并发锁下重叠触发会自动补跑。
             if (result.progress && result.progress.success > 0) {
-                this._refreshOfflineData('批量下载完成');
+                this._flushOfflineDelta('批量下载完成');
             }
             
         } catch (error) {
@@ -497,23 +530,66 @@ class ContentScript {
             // 使用 File System Access API
             if ('showDirectoryPicker' in window) {
                 // ✅ 浏览器通过 id 参数自动记忆上次选择的目录
-                const dirHandle = await window.showDirectoryPicker({
+                const parentHandle = await window.showDirectoryPicker({
                     id: 'favgallery-root-directory',  // 浏览器会自动记忆
                     mode: 'readwrite',
                     startIn: 'downloads'
                 });
-                
-                // ✅ 初始化文件系统（包括日志系统）
-                fileSystem.setRootDirectory(dirHandle);
+
+                // ✅ 身份前置：没有身份就没有数据区，绝不“不知道是谁”的情况下写数据
+                let userInfo = null;
+                try {
+                    userInfo = getUserInfoFromPage();
+                } catch (e) {
+                    logger.error('❌ 获取登录账号身份异常:', e);
+                }
+                if (!userInfo?.uid) {
+                    iframe.contentWindow.postMessage({
+                        source: 'content',
+                        type: 'FOLDER_SELECTED',
+                        success: false,
+                        error: '未能获取登录的抖音账号信息，请刷新抖音页面并确认登录后再选择文件夹'
+                    }, '*');
+                    return;
+                }
+
+                // ✅ 解析/创建账号数据子目录：只按 [uid] 匹配复用（昵称改版不换目录）
+                const childNames = [];
+                for await (const entry of parentHandle.values()) {
+                    childNames.push(entry.name);
+                }
+                let accountDirName = findAccountFolderName(childNames, userInfo.uid);
+                if (!accountDirName) {
+                    accountDirName = buildAccountFolderName(userInfo.nickname, userInfo.uid);
+                }
+                if (!accountDirName) {
+                    iframe.contentWindow.postMessage({
+                        source: 'content',
+                        type: 'FOLDER_SELECTED',
+                        success: false,
+                        error: `账号 uid 异常（${userInfo.uid}），无法建立数据区，请刷新页面重试`
+                    }, '*');
+                    return;
+                }
+
+                const accountDirHandle = await parentHandle.getDirectoryHandle(accountDirName, { create: true });
+
+                // ✅ 数据库与内存态先切到该账号专属数据区，再初始化文件系统
+                //    （fileSystem.init 内部会 database.init 开库，顺序颠倒会多开一次 guest 库）
+                database.useAccount(userInfo.uid);
+                setAccount({ uid: userInfo.uid, nickname: userInfo.nickname, folderName: accountDirName });
+
+                // ✅ 初始化文件系统（root 指向账号子目录，元数据/资产/离线/日志全部自动下沉一级）
+                fileSystem.setRootDirectory(accountDirHandle);
                 await fileSystem.init();
-                logger.info('✅ 文件系统已初始化');
+                logger.info('✅ 文件系统已初始化（账号数据区）:', accountDirName);
                 
                 // ✅ 加载/生成用户配置文件，并重建列表配置（使 maxCount 等由配置驱动）
                 await userConfig.ensureConfig(fileSystem);
                 dataFetcher.reloadConfigs();
                 logger.info('✅ 用户配置已加载并应用');
                 
-                // ✅ 自动检查并恢复备份
+                // ✅ 自动检查并恢复备份（新账号库为空时从账号目录内的磁盘备份灌回，天然同账号）
                 await this.autoRestoreFromBackup();
                 
                 // 通知 dataFetcher 文件夹已选择
@@ -522,16 +598,27 @@ class ContentScript {
                 // ✅ 异步生成FavGallery 离线页静态壳 + 数据（不阻塞 UI；失败仅记录日志）
                 this._generateOfflineShell();
                 this._refreshOfflineData('选择文件夹');
+
+                // ✅ 账号绑定记录落入账号库 settings（setSetting 自带选择性备份，fire-and-forget）
+                import('../data/storage/settings-manager.js')
+                    .then(({ setSetting }) => setSetting('account_binding', {
+                        uid: userInfo.uid,
+                        nickname: userInfo.nickname,
+                        folderName: accountDirName,
+                        boundAt: Date.now()
+                    }))
+                    .catch(error => logger.warn('⚠️ 账号绑定记录写入失败:', error?.message));
                 
-                // 通知侧边栏
+                // 通知侧边栏（携带账号信息供状态栏展示与影子库切名）
                 iframe.contentWindow.postMessage({
                     source: 'content',
                     type: 'FOLDER_SELECTED',
                     success: true,
-                    path: dirHandle.name
+                    path: parentHandle.name,
+                    account: { uid: userInfo.uid, nickname: userInfo.nickname, folderName: accountDirName }
                 }, '*');
                 
-                logger.info('✅ 文件夹选择成功:', dirHandle.name);
+                logger.info('✅ 文件夹选择成功:', parentHandle.name, '→', accountDirName);
             } else {
                 // 浏览器不支持
                 iframe.contentWindow.postMessage({
@@ -567,6 +654,50 @@ class ContentScript {
     }
     
     /**
+     * ✅ 账号数据区守卫：业务读写前确认“已绑定 + 当前登录身份与绑定一致”
+     * 三态口径与关注校验一致：页面取不到当前身份（unknown）时不拦截不改判；
+     * 确证切号（switched）时阻断并引导重选文件夹（FSA 无法从子目录向上回溯，必须用户手势）
+     *
+     * @param {HTMLIFrameElement} iframe - 侧边栏 iframe（用于 UI 提示）
+     * @returns {Promise<boolean>} 是否放行
+     */
+    async _ensureAccountReady(iframe) {
+        const bound = getAccount();
+        if (!bound) {
+            this._blockWithAccountTip(iframe, '尚未绑定账号数据区（页面刷新后需重新绑定）：请先点击“选择文件夹”（浏览器记住上次目录，一次点击即完成）');
+            return false;
+        }
+        let current = null;
+        try {
+            // 页面直取而非 platformAPI 缓存：切号后缓存可能仍是旧身份
+            current = getUserInfoFromPage();
+        } catch (_) { /* 取不到按未知处理，放行 */ }
+        const verdict = checkAccountSwitch(current);
+        if (!verdict.ok && verdict.reason === 'switched') {
+            this._blockWithAccountTip(iframe, `检测到已切换抖音账号（${current.nickname || current.uid}），当前数据区属于 ${bound.nickname || bound.uid}，请重新选择文件夹完成切换`);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 守卫阻断提示（红色 UI 日志 + 控制台警告）
+     * @param {HTMLIFrameElement} iframe - 侧边栏 iframe
+     * @param {string} message - 提示文本
+     */
+    _blockWithAccountTip(iframe, message) {
+        logger.warn(`🔒 ${message}`);
+        try {
+            iframe?.contentWindow?.postMessage({
+                source: 'content',
+                type: 'UI_LOG',
+                level: 'error',
+                message: `🔒 ${message}`
+            }, '*');
+        } catch (_) { /* iframe 已卸载等场景，忽略 */ }
+    }
+
+    /**
      * ✅ 异步生成FavGallery 离线页静态壳（FavGallery.html + resources/offline-viewer/*）
      * fire-and-forget：不 await；每次选文件夹覆盖，保证壳与扩展版本一致
      */
@@ -585,21 +716,41 @@ class ContentScript {
     }
     
     /**
-     * ✅ 异步刷新FavGallery 离线页数据
-     * fire-and-forget：不 await，避免阻塞主流程；生成器内部有并发保护，重复触发会被跳过
+     * ✅ 异步准备FavGallery 离线页数据（首次种子 / 之后增量）
+     * fire-and-forget：不 await，避免阻塞主流程；内部有并发保护，重复触发会被跳过或补跑
      * @param {string} reason - 触发原因（仅用于日志）
      */
     _refreshOfflineData(reason = '') {
-        generateOfflineData()
+        ensureOfflineData()
             .then(result => {
                 if (result?.success) {
-                    logger.info(`✅ 离线数据生成完成（${reason}）:`, result.counts);
+                    logger.info(`✅ 离线数据已就绪（${reason}）`);
                 } else {
-                    logger.info(`ℹ️ 离线数据生成未执行（${reason}）: ${result?.reason || result?.error || '未知'}`);
+                    logger.info(`ℹ️ 离线数据未执行（${reason}）: ${result?.reason || result?.error || '未知'}`);
                 }
             })
             .catch(error => {
-                logger.warn(`⚠️ 离线数据生成异常（${reason}）:`, error?.message);
+                logger.warn(`⚠️ 离线数据准备异常（${reason}）:`, error?.message);
+            });
+    }
+
+    /**
+     * ✅ 异步增量刷写离线数据（下载完成等变更后调用，只重建受影响分片）
+     * @param {string} reason - 触发原因（仅用于日志）
+     */
+    _flushOfflineDelta(reason = '') {
+        flushOfflineDelta()
+            .then(result => {
+                if (result?.success) {
+                    logger.info(`♻️ 离线增量刷新完成（${reason}）: 重建 ${result.shards} 个分片`);
+                } else if (result?.reason === 'in_progress') {
+                    logger.debug(`⏳ 离线增量刷新进行中，已合并（${reason}）`);
+                } else {
+                    logger.info(`ℹ️ 离线增量刷新未执行（${reason}）: ${result?.reason || result?.error || '未知'}`);
+                }
+            })
+            .catch(error => {
+                logger.warn(`⚠️ 离线增量刷新异常（${reason}）:`, error?.message);
             });
     }
     
@@ -874,8 +1025,20 @@ logger.info('🚀 Content Script 启动...');
 window.contentScript = new ContentScript();
 
 // ✅ 全局错误边界：logger + fileLogger 落盘，并转发 UI_LOG 进侧边栏日志与红条提示
+// ⚠️ 必须过滤：main.js 以 <script> 注入的是页面主世界（非 Content Script 隔离世界），
+//    window 上的 error/unhandledrejection 会连带捕获抖音站点自身脚本报错（如退出登录时
+//    自身发起的接口请求失败抛出 "Network request failed, status: 0"），与本项目无关，
+//    若不过滤会以「运行异常」红条打扰用户，且难以手动消除。仅保留命中扩展自身来源的上报。
 installErrorBoundary({
     context: 'Content',
+    filter: (error, source, filename) => {
+        const origin = window.contentScript?.extensionOrigin;
+        // 拿不到扩展来源信息（异常初始化场景）时不过滤，宁可多报不可漏报自身问题
+        if (!origin) return true;
+        if (filename && filename.startsWith(origin)) return true;
+        const stack = error && typeof error === 'object' ? String(error.stack || '') : '';
+        return stack.includes(origin);
+    },
     onError: ({ message, count, error }) => {
         const summary = String(message || '').split('\n')[0];
         const label = `[Content] ${summary}${count > 1 ? ` (x${count})` : ''}`;
