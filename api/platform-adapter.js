@@ -5,6 +5,7 @@
 
 import { CONFIG } from '../config/constants.js';
 import { DouyinAPI } from './douyin/api.js';
+import { FOLLOW_STATE } from '../utils/follow-verification.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('PlatformAdapter');
@@ -231,6 +232,22 @@ class PlatformAdapter {
             throw new Error(`当前平台 (${this.currentPlatform}) 不支持获取作者所有作品`);
         }
         return this.api.getAuthorWorksForDownload(platformId, maxCount);
+    }
+
+    /**
+     * ✅ 查询当前账号是否仍关注指定作者（下载链路的取关单点取证）
+     * 与同类方法不同：平台不支持时返回 unknown 而不报错——
+     * “查不到”绝不等于“已取关”，报错会让调用方无法区分这两种情况，
+     * 因此统一降级为 unknown，由调用方按安全侧处理（照常下载、不打软删除标记）
+     *
+     * @param {string} platformId - 作者的 platformId（抖音为 sec_user_id）
+     * @returns {Promise<string>} 'following' | 'unfollowed' | 'unknown'
+     */
+    async getAuthorFollowStatus(platformId) {
+        if (!this.api.getAuthorFollowStatus) {
+            return FOLLOW_STATE.UNKNOWN;
+        }
+        return this.api.getAuthorFollowStatus(platformId);
     }
 
     /**

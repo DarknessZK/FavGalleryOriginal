@@ -61,6 +61,15 @@ export async function generateStaticShell(extensionOrigin) {
     }
 
     try {
+        // ✅ 强制干净覆盖：写前先递归删除旧离线壳目录 + 入口 HTML，
+        // 清除可能残留的历史文件（包括已不在 SHELL_FILES 映射表内的旧产物），再全量重写
+        try {
+            await fileSystem.removeDirectory(viewerDir);
+            await fileSystem.removeFile(CONFIG.FILE_SYSTEM.OFFLINE_ENTRY_HTML);
+        } catch (cleanError) {
+            logger.warn('⚠️ 清理旧离线壳失败（将尝试直接覆盖写入）:', cleanError?.message || cleanError);
+        }
+
         let count = 0;
         // 资源版本号：给入口 HTML 引用的静态壳资源（CSS/JS）追加 ?v=，
         // 使每次重新生成后 file:// 页面刷新必然重新拉取，规避浏览器对本地 JS/CSS 的旧缓存

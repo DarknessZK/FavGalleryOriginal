@@ -15,7 +15,7 @@ const logger = createLogger('AuthorWorksLoader');
 
 class AuthorWorksLoader {
     constructor() {
-        // ✅ 会话级作者作品缓存（uid → works），代数由「刷新关注列表」按钮驱动：
+        // ✅ 会话级作者作品缓存（uid → { works, truncated, maxCount }），代数由「刷新关注列表」按钮驱动：
         // - 已加载过的作者再次钻取 → 静默复用（不走 API、秒开）
         // - 点击刷新关注列表 / 重选文件夹（invalidateCache）整个作废，之后首次钻取重新加载
         this.cache = null;
@@ -71,10 +71,16 @@ class AuthorWorksLoader {
             if (!this.cache) this.cache = new Map();
 
             // ✅ 会话内已加载过（本次刷新代数内）：直接复用，秒开不发 API
-            const cachedWorks = this.cache.get(uid);
-            if (cachedWorks) {
-                logger.info(`⚡ 本次刷新周期内已加载过，直接复用: UID=${uid} (${cachedWorks.length} 个作品)`);
-                send('AUTHOR_WORKS_LOADED', { works: cachedWorks, total: cachedWorks.length });
+            //    缓存存完整上下文（作品 + 截断标注 + 生效上限），复用时才能重现“清单不全”提示
+            const cached = this.cache.get(uid);
+            if (cached) {
+                logger.info(`⚡ 本次刷新周期内已加载过，直接复用: UID=${uid} (${cached.works.length} 个作品)`);
+                send('AUTHOR_WORKS_LOADED', {
+                    works: cached.works,
+                    total: cached.works.length,
+                    truncated: cached.truncated,
+                    maxCount: cached.maxCount
+                });
                 return;
             }
 
@@ -99,12 +105,20 @@ class AuthorWorksLoader {
                 throw new Error('加载未执行，请先选择保存文件夹');
             }
 
+            // ✅ 截断标注（data-fetcher 挂载在返回数组上的属性）：必须在 filter 前捕获，
+            //    filter 生成新数组会丢失数组自定义属性
+            const truncated = works.truncated === true;
+            const maxCount = works.maxCount;
+
             // ✅ 过滤软删除项（作者已删除的作品被合并标记，不展示给钻取列表）
             const validWorks = works.filter(work => !work.isDeleted);
-            this.cache.set(uid, validWorks);
+            this.cache.set(uid, { works: validWorks, truncated, maxCount });
 
             logger.info(`✅ 作者作品加载完成: ${validWorks.length} 个（合并后过滤软删除 ${works.length - validWorks.length} 个）`);
-            send('AUTHOR_WORKS_LOADED', { works: validWorks, total: validWorks.length });
+            if (truncated) {
+                logger.warn(`⚠️ 作者作品未全部加载：已达上限 ${maxCount}，可能还有更多（可提示用户提高上限）`);
+            }
+            send('AUTHOR_WORKS_LOADED', { works: validWorks, total: validWorks.length, truncated, maxCount });
         } catch (error) {
             logger.error(`❌ 作者作品加载失败: UID=${uid}`, error);
             send('AUTHOR_WORKS_ERROR', { error: error.message || '未知错误' });

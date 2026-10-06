@@ -37,6 +37,7 @@
 - [五、通信协议规则](#五通信协议规则)
 - [六、备份系统规则](#六备份系统规则)
 - [七、代码组织规则](#七代码组织规则)
+- [八、MV3 资源注册规则](#八mv3-资源注册规则)
 
 ---
 
@@ -845,6 +846,46 @@ async verifyBackupIntegrity(backupData, expectedHash) {
 
 ---
 
+## 八、MV3 资源注册规则（web_accessible_resources）⭐⭐⭐
+
+**核心要求：** 凡注入链上的文件，新增/重命名时必须同步登记 `manifest.json` 的 `web_accessible_resources`，否则侧边栏直接打不开。
+
+### 8.1 失败原理
+
+侧边栏 `content/main.js` 以 `<script type="module">` 注入页面的 **MAIN world**，它 `import` 的每个模块都由浏览器以 `chrome-extension://` URL 跨 origin 拉取，受 `web_accessible_resources` 白名单限制。**只要链上有一个文件没登记**，该文件加载被拦 → 整个 ES module 依赖图构建失败 → 注入报「main.js 模块链加载出错」、侧边栏完全打不开（历史踩坑：新增 `utils/worklist-truncation.js`、`content/services/sidebar-injector.js` 时漏登记各炸过一次）。
+
+### 8.2 必须登记的范围
+
+被**注入链**（`content/main.js` 及其递归 import 的 `core/`、`utils/`、`data/`、`api/`、`config/`、`content/services/` 模块）引用的资源：
+
+- ✅ `.js` 模块——含纯函数工具（如 `utils/soft-delete-policy.js`、`utils/worklist-truncation.js`）
+- ✅ 被 fetch 读取的静态壳资源（`ui/html/*.html`、`ui/css/*.css`、`data/export/*.js` 等）
+
+### 8.3 不需登记（易混淆豁免项）
+
+| 文件 | 为什么不需 WAR |
+|------|---------------|
+| `content/index.js` | content_scripts 入口，浏览器直接注入，不走 module fetch |
+| `background.js` | service_worker，扩展自身加载 |
+| `tests/*.js` | 测试台扩展页（chrome-extension origin）同源自加载 |
+
+### 8.4 自查方法（新增注入链文件后必做）
+
+把 WAR `resources` 段与磁盘 `.js` 求差，差集应**只剩** 8.3 的豁免项：
+
+```bash
+# 1) 抽取 WAR resources 里的 .js（awk 先隔离 resources 段，避免误匹配 content_scripts/background）
+awk '/"web_accessible_resources"/{f=1} f' manifest.json | grep -oE '"[^"]+\.js"' | tr -d '"' | LC_ALL=C sort -u > /tmp/war.txt
+# 2) 递归枚举磁盘 .js（排除 tests/）
+shopt -s globstar; ls **/*.js | grep -v '^tests/' | LC_ALL=C sort -u > /tmp/disk.txt
+# 3) 磁盘有、WAR 没登记 → 正常应只剩 content/index.js 与 background.js
+LC_ALL=C comm -23 /tmp/disk.txt /tmp/war.txt
+```
+
+差集里若冒出注入链上的新文件即为漏登记，补进 `web_accessible_resources` 后到 `chrome://extensions` 重载扩展、刷新页面验证注入正常。
+
+---
+
 ## 📝 总结
 
 本文档定义了 FavGallery 项目的核心开发规则，所有开发人员必须严格遵守。违反这些规则将导致：
@@ -861,7 +902,7 @@ async verifyBackupIntegrity(backupData, expectedHash) {
 
 ---
 
-**文档版本：** v1.0  
-**最后更新：** 2026-05-06  
+**文档版本：** v1.1  
+**最后更新：** 2026-09-28  
 **维护者：** FavGallery 开发团队
 

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>FavGallery 逻辑测试台</title>
+    <!--
+      纯逻辑单元测试台（不依赖被审核的业务界面，也不需要本机 Node）
+      打开方式：地址栏输入 chrome-extension://<扩展ID>/tests/index.html
+      注意：MV3 扩展页面 CSP 为 script-src 'self'，禁止内联脚本，
+           运行逻辑必须写在 tests/test-runner.js 中
+      新增套件：在 test-runner.js 的 SUITES 里追加一项，模块需导出 run() 并返回
+                { title, groups: [{ name, cases: [{ name, ok, expected, actual }] }], passed, failed }
+    -->
+    <style>
+        body { margin: 0; padding: 20px; background: #f0f2f5; color: #333;
+               font: 13px/1.6 "Microsoft YaHei", -apple-system, sans-serif; }
+        h1 { font-size: 18px; margin: 0 0 4px; }
+        .sub { color: #888; margin-bottom: 16px; }
+        .summary { display: flex; gap: 10px; align-items: center; margin-bottom: 18px;
+                   padding: 12px 16px; border-radius: 8px; font-size: 15px; font-weight: bold; }
+        .summary.pass { background: #f6ffed; border: 1px solid #b7eb8f; color: #389e0d; }
+        .summary.fail { background: #fff1f0; border: 1px solid #ffa39e; color: #cf1322; }
+        .suite { background: #fff; border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;
+                 box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+        .suite h2 { font-size: 14px; margin: 0 0 10px; display: flex; justify-content: space-between; }
+        .suite h2 .badge { font-size: 12px; font-weight: normal; color: #999; }
+        .group { margin-bottom: 10px; }
+        .group > .gname { font-weight: bold; color: #555; margin: 8px 0 4px; }
+        ul.cases { list-style: none; margin: 0; padding: 0; }
+        ul.cases li { padding: 3px 8px; border-left: 3px solid #d9d9d9; margin-bottom: 3px;
+                      background: #fafafa; font-family: Consolas, monospace; font-size: 12px; }
+        ul.cases li.ok { border-left-color: #52c41a; }
+        ul.cases li.fail { border-left-color: #ff4d4f; background: #fff1f0; color: #cf1322; font-weight: bold; }
+        ul.cases li .detail { display: block; color: #888; font-weight: normal; margin-left: 14px; }
+    </style>
+</head>
+<body>
+    <h1>FavGallery 逻辑测试台</h1>
+    <div class="sub">只覆盖可脱离浏览器环境验证的纯逻辑判定；涉及落库、界面、下载链路的行为验证请走各步骤的集成实验手册。</div>
+    <div id="summary" class="summary">正在运行...</div>
+    <div id="suites"></div>
+
+    <script type="module" src="./test-runner.js"></script>
+</body>
+</html>

@@ -298,10 +298,12 @@ class DownloadHandler {
                 break;
 
             case 'completed':
+                // ✅ 已保存：保持按钮可点击（语义 = 点击检查并补全缺失文件），仅复选框维持禁用（不纳入批量）
                 downloadBtn.innerHTML = '<span style="display: block; text-align: center;">✅ 已保存</span>';
                 downloadBtn.style.background = '#52c41a';
-                downloadBtn.style.cursor = 'default';
-                downloadBtn.disabled = true;
+                downloadBtn.style.cursor = 'pointer';
+                downloadBtn.disabled = false;
+                downloadBtn.title = '已保存，点击检查并补全缺失的文件';
 
                 // ✅ 禁用对应的复选框
                 this._disableWorkCheckbox(workId);
@@ -568,10 +570,14 @@ class DownloadHandler {
     async handleBatchDownloadComplete(data) {
         const { batchId, result } = data;
         
-        logger.info(`✅ 批量下载完成: 成功 ${result.progress.success}, 失败 ${result.progress.failed}`);
+        // ✅ 按本次任务数量决定文案：单个作品不称“批量”，避免用户误以为在跑批量下载
+        const total = result.progress.total ?? (result.progress.success + result.progress.failed);
+        const scope = total > 1 ? '批量保存' : '保存';
+        
+        logger.info(`✅ ${scope}完成: 成功 ${result.progress.success}, 失败 ${result.progress.failed}`);
         
         // ✅ UI 日志
-        logToUI('success', `✅ 批量保存完成: 成功 ${result.progress.success}, 失败 ${result.progress.failed}`);
+        logToUI('success', `✅ ${scope}完成: 成功 ${result.progress.success}, 失败 ${result.progress.failed}`);
         
         // ✅ 显示最终状态（区分正常完成和被停止）
         if (this.currentBatchListType) {
@@ -582,7 +588,7 @@ class DownloadHandler {
                     `⏹️ 已停止（已完成 ${result.progress.current}/${result.progress.total}）`,
                     '#faad14'
                 );
-                logToUI('info', `⏹️ 批量保存已被用户停止`);
+                logToUI('info', `⏹️ ${scope}已被用户停止`);
             } else {
                 // ✅ 正常完成
                 this._showStatusMessage(
@@ -616,10 +622,10 @@ class DownloadHandler {
     async handleBatchDownloadError(data) {
         const { batchId, error } = data;
         
-        logger.error(`❌ 批量下载错误: ${error}`);
+        logger.error(`❌ 保存任务错误: ${error}`);
         
-        // ✅ UI 日志
-        logToUI('error', `❌ 批量保存失败: ${error}`);
+        // ✅ UI 日志（错误时无数量上下文，用中性文案避免误标“批量”）
+        logToUI('error', `❌ 保存失败: ${error}`);
         
         // ✅ 显示错误状态
         if (this.currentBatchListType) {

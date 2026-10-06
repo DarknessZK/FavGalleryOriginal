@@ -52,7 +52,8 @@ class MessageHandler {
                     break;
 
                 case 'LIKED_WORKS_LOADED':
-                    this.app.handleLikedWorksLoaded(event.data.works, event.data.total);
+                    // ✅ 容错：异常链路下 works 可能为 null，入口层统一兜底为空数组
+                    this.app.handleLikedWorksLoaded(event.data.works || [], event.data.total);
                     break;
 
                 case 'LIKED_WORKS_PROGRESS':
@@ -76,11 +77,13 @@ class MessageHandler {
                     this.app.handleLikedWorksError(event.data.error);
                     break;
 
-                // ✅ 关注列表加载完成
-                case 'FOLLOWING_AUTHORS_LOADED':
-                    logger.info(`👥 收到关注列表: ${event.data.authors.length} 个作者`);
-                    this.app.handleFollowingAuthorsLoaded(event.data.authors, event.data.total);
+                // ✅ 关注列表加载完成（✅ 容错：异常链路下 authors 可能为 null，入口层统一兜底为空数组）
+                case 'FOLLOWING_AUTHORS_LOADED': {
+                    const authors = event.data.authors || [];
+                    logger.info(`👥 收到关注列表: ${authors.length} 个作者`);
+                    this.app.handleFollowingAuthorsLoaded(authors, event.data.total ?? authors.length);
                     break;
+                }
 
                 // ✅ 关注列表加载进度
                 case 'FOLLOWING_AUTHORS_PROGRESS':
@@ -105,14 +108,15 @@ class MessageHandler {
                     this.app.handleLoadDataStart(event.data.listType);
                     break;
 
-                // ✅ 收藏夹列表加载完成
-                case 'COLLECTS_LIST_LOADED':
-                    logger.info(`📋 收到收藏夹列表: ${event.data.collects.length} 个`);
+                // ✅ 收藏夹列表加载完成（✅ 容错：新用户无收藏夹/异常链路下 collects 可能为 null，入口层统一兜底为空数组）
+                case 'COLLECTS_LIST_LOADED': {
+                    const collects = event.data.collects || [];
+                    logger.info(`📋 收到收藏夹列表: ${collects.length} 个`);
                     
                     // ✅ UI 日志
-                    logToUI('info', `✅ 已加载 ${event.data.collects.length} 个收藏夹`);
+                    logToUI('info', `✅ 已加载 ${collects.length} 个收藏夹`);
                     
-                    this.app.initCollectsSelector(event.data.collects);
+                    this.app.initCollectsSelector(collects);
                     
                     // ✅ 恢复所有控制按钮
                     this.app.uiStateManager.enableAllControlButtons();
@@ -120,6 +124,7 @@ class MessageHandler {
                     // ✅ 恢复作品按钮
                     this.app.uiStateManager.enableAllWorkDownloadButtons();
                     break;
+                }
                 
                 // ✅ 收藏夹列表加载错误
                 case 'COLLECTS_LIST_ERROR':
@@ -133,11 +138,13 @@ class MessageHandler {
                     this.app.uiStateManager.enableAllWorkDownloadButtons();
                     break;
                 
-                // ✅ 收藏夹作品加载完成
-                case 'COLLECT_WORKS_LOADED':
-                    logger.info(`🎬 收到收藏夹作品: ${event.data.works.length} 个`);
-                    this.app.handleCollectWorksLoaded(event.data.works, event.data.total);
+                // ✅ 收藏夹作品加载完成（✅ 容错：异常链路下 works 可能为 null，入口层统一兜底为空数组）
+                case 'COLLECT_WORKS_LOADED': {
+                    const collectWorks = event.data.works || [];
+                    logger.info(`🎬 收到收藏夹作品: ${collectWorks.length} 个`);
+                    this.app.handleCollectWorksLoaded(collectWorks, event.data.total);
                     break;
+                }
                 
                 // ✅ 收藏夹作品加载错误
                 case 'COLLECT_WORKS_ERROR':
@@ -240,6 +247,13 @@ class MessageHandler {
                             event.data.uid,
                             event.data.success
                         );
+                    }
+                    break;
+
+                // ✅ 下载前单点校验确认已取关（Content 侧已写软删除标记，此处同步界面与跟踪状态）
+                case 'AUTHOR_UNFOLLOWED':
+                    if (this.app.authorDownloadManager) {
+                        await this.app.authorDownloadManager.handleAuthorUnfollowed(event.data);
                     }
                     break;
 

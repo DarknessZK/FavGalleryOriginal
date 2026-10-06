@@ -245,6 +245,183 @@ body {
     pointer-events: none;
 }
 
+/* ✅ 自定义“时长”多选下拉（仅视频模式启用；档位复选、多选不自动收起、点外自动收起） */
+.dur-dropdown {
+    font-size: 12px;
+}
+
+.dur-trigger {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    background: #fff;
+    color: #333;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.dur-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dur-caret {
+    font-size: 10px;
+    color: #999;
+}
+
+/* 已选中任意档位时触发器标蓝，与“批量选择”一致 */
+.dur-dropdown.has-active .dur-trigger {
+    border-color: #1890ff;
+    color: #1890ff;
+    font-weight: 600;
+    background: #e6f4ff;
+}
+
+.dur-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    min-width: 100%;
+    background: #fff;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 130;
+    padding: 4px 0;
+}
+
+.dur-dropdown.open .dur-menu {
+    display: block;
+}
+
+.dur-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    color: #333;
+}
+
+.dur-item:hover {
+    background: #f0f7ff;
+}
+
+.dur-item .dur-check {
+    width: 14px;
+    text-align: center;
+    color: #1890ff;
+    font-size: 12px;
+}
+
+.dur-item.checked {
+    color: #1890ff;
+    font-weight: 600;
+}
+
+.dur-dropdown.is-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* ✅ 自定义“批量选择”作用域下拉（支持单项高亮当前作用域 + 再次点击同项取消，原生 select 无法实现） */
+.batch-scope-dropdown {
+    font-size: 12px;
+}
+
+.batch-scope-trigger {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    background: #fff;
+    color: #333;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    /* ✅ 固定宽度（含内边距/边框）：容纳最宽标签“已保存（补全）”与加粗态，切换作用域时整行不再波动 */
+    box-sizing: border-box;
+    width: 118px;
+    flex: 0 0 118px;
+}
+
+.batch-scope-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 当前作用域生效时触发器标蓝 */
+.batch-scope-trigger.is-active {
+    border-color: #1890ff;
+    color: #1890ff;
+    font-weight: 600;
+    background: #e6f4ff;
+}
+
+.batch-scope-caret {
+    font-size: 10px;
+    color: #999;
+    margin-left: auto;
+}
+
+.batch-scope-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    min-width: 100%;
+    background: #fff;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 120;
+    padding: 4px 0;
+}
+
+.batch-scope-dropdown.open .batch-scope-menu {
+    display: block;
+}
+
+.batch-scope-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    color: #333;
+}
+
+.batch-scope-item:hover {
+    background: #f0f7ff;
+}
+
+.batch-scope-item.active {
+    color: #1890ff;
+    font-weight: 600;
+}
+
+.batch-scope-item .batch-scope-check {
+    font-size: 11px;
+    color: #1890ff;
+}
+
 .log-entry {
     margin-bottom: 4px;
     padding: 2px 0;

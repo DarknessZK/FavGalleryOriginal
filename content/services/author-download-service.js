@@ -1,6 +1,6 @@
 // ==========================================
 // 作者下载服务 - 处理作者作品下载流程
-// 职责：获取作品、建立关系、启动批量下载
+// 职责：下载前关注状态单点取证 + 获取作品、建立关系、启动批量下载
 // ==========================================
 
 import { createLogger } from '../../utils/logger.js';
@@ -8,7 +8,9 @@ import { platformAPI } from '../../api/platform-adapter.js';
 import * as relationManager from '../../data/database/relation-manager.js';
 import { database } from '../../data/database/database.js';
 import { BatchDownloadManager } from '../../download/batch-download-manager.js';
-import { generateOfflineData } from '../../data/export/offline-data-generator.js';
+import { flushOfflineDelta } from '../../data/export/offline-delta.js';
+import { markAuthorsUnfollowed } from '../../data/storage/authors-manager.js';
+import { FOLLOW_STATE, resolveAuthorDownloadDecision } from '../../utils/follow-verification.js';
 
 const logger = createLogger('AuthorDownloadService');
 
@@ -34,6 +36,62 @@ export class AuthorDownloadService {
     }
 
     /**
+     * ✅ 下载前的关注状态单点校验（取关检测的主责入口）
+     *
+     * 为何不放在刷新链路：关注清单仍“从新到旧”分页且命中缓存即提前停止，
+     * 刷新时只看到清单头部，取消关注的老作者检不出来；按人单点确认则不依赖清单完整性，
+     * 且本来每位作者都要拉一次作品清单，多这一发请求是顺路的。
+     *
+     * @param {string} platformId - 作者 sec_user_id
+     * @param {string} uid - 作者 UID
+     * @param {string} nickname - 作者昵称（仅日志用）
+     * @returns {Promise<Object>} resolveAuthorDownloadDecision 的结果
+     * @private
+     */
+    async _verifyFollowing(platformId, uid, nickname) {
+        try {
+            const followState = await platformAPI.getAuthorFollowStatus(platformId);
+            const decision = resolveAuthorDownloadDecision(followState);
+            const label = nickname || uid;
+
+            if (followState === FOLLOW_STATE.UNKNOWN) {
+                logger.warn(`❓ [关注校验] ${label}：${decision.reason}`);
+            } else {
+                logger.info(`🔍 [关注校验] ${label}：follow_status=${followState === FOLLOW_STATE.FOLLOWING ? 1 : 0}，${decision.reason}`);
+            }
+            return decision;
+        } catch (error) {
+            // ✅ 校验自身的任何异常都降级为“未知”：既不阻断下载，也绝不打软删除标记
+            logger.warn(`⚠️ [关注校验] 异常，按未知处理并照常下载: ${error?.message || error}`);
+            return resolveAuthorDownloadDecision(FOLLOW_STATE.UNKNOWN);
+        }
+    }
+
+    /**
+     * ✅ 已确认取关的作者处置：打软删除标记 + 通知 Sidebar + 跳过下载
+     * 条目继续保留在列表与 authors 表里，已下载作品与本地文件一律不动
+     * @private
+     */
+    async _handleUnfollowedAuthor(uid, nickname, iframe, batchId, reason) {
+        logger.info(`🚫 [关注校验] ${nickname || uid} 已取消关注，跳过作品下载`);
+
+        try {
+            await markAuthorsUnfollowed(this.fileSystem, [uid], reason);
+        } catch (error) {
+            logger.warn(`⚠️ 写入取关标记失败（不影响本次跳过）: ${error?.message || error}`);
+        }
+
+        iframe?.contentWindow.postMessage({
+            source: 'content',
+            type: 'AUTHOR_UNFOLLOWED',
+            uid,
+            nickname: nickname || '',
+            batchId,
+            reason
+        }, '*');
+    }
+
+    /**
      * ✅ 处理作者作品下载
      * @param {Object} data - 下载参数
      * @param {HTMLIFrameElement} iframe - 通信目标
@@ -44,6 +102,13 @@ export class AuthorDownloadService {
         try {
             // ✅ 立即设置 batchId（防止在等待 API 时用户点击停止）
             this.currentBatchId = batchId;
+            
+            // ✅ 下载前单点取证：明确取关则跳过并标删；状态不可判定时照常下载
+            const decision = await this._verifyFollowing(platformId, uid, nickname);
+            if (decision.shouldSkip) {
+                await this._handleUnfollowedAuthor(uid, nickname, iframe, batchId, decision.reason);
+                return;
+            }
             
             logger.info(`👤 开始获取作者 ${nickname || uid} 的所有作品...`);
             
@@ -239,11 +304,12 @@ export class AuthorDownloadService {
             
             logger.info(`✅ 作者作品下载完成: 成功 ${result.progress.success}, 失败 ${result.progress.failed}`);
             
-            // ✅ 作者下载改变了保存状态/本地媒体/作者下载进度，异步刷新FavGallery 离线页数据（仅当有成功下载）
+            // ✅ 增量刷新：作者下载改变了保存状态/本地媒体/作者下载进度，触发一次增量刷写（只重建受影响分片）。
+            //    脏已在 relation-manager(batchAddRelations) 与 database(markAsDownloaded) 处登记，本处仅驱动合并写盘。
             if (result.progress && result.progress.success > 0) {
-                generateOfflineData()
-                    .then(r => { if (r && r.success) logger.info('✅ 离线数据已刷新（作者下载完成）'); })
-                    .catch(e => logger.warn('⚠️ 离线数据刷新失败（作者下载完成）:', e?.message));
+                flushOfflineDelta()
+                    .then(r => { if (r && r.success) logger.info(`♻️ 离线增量刷新完成（作者下载完成）: 重建 ${r.shards} 个分片`); })
+                    .catch(e => logger.warn('⚠️ 离线增量刷新异常（作者下载完成）:', e?.message));
             }
             
             // 清理引用

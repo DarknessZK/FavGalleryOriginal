@@ -1,8 +1,11 @@
 # FavGallery 业务功能完成度评估
 
 > **评估时间**: 2026-05-06  
-> **最近更新**: 2026-09-27（二批：侧边栏分页对齐离线页（首/末页 + 跳至页输入框，四列表统一）并修复分页条换行、作品卡片显示发布时间、排序控件改自定义下拉（点已选维度即切升降）、布尔排序补时间次级键、Tab 顺序统一点赞→收藏→关注且侧边栏默认打开点赞、离线页排序升级为多维叠加 + 交互职责分离（v2.8）；一批：侧边栏排序 + 高级筛选完整版：作品三表（点赞/收藏/作者钻取）按时间/保存状态排序+升降切换、类型筛选（视频/图集）、点赞+收藏按作者多选筛选；标签筛选因依赖尚未实现的标签系统，单独排期）  
-> **此前更新**: 2026-09-26（作者卡片下载计数专项：跨 origin 持久化修复 + 实时校正 + 主库合并写；同日：关注列表刷新双发 loaded bug 修复、钻取分页按钮复活 bug 修复、作者钻取 maxCount 接入配置面板、作者卡片统计行紧凑化 + 返回按钮蓝色主题；更早：P1 落地：侧边栏高级筛选基础版（保存状态+时间范围，点赞/收藏/作者作品钻取视图三处）+ 关注列表「🎬 作品」作者作品钻取子视图（只读卡片）+ 全局错误边界（提示条+日志，三上下文接入）+ 界面配置面板（Sidebar 可视化读写 config.json，backup 配置迁入配置文件，version 2）；同日早些时候：结构重构——content/main.js 瘦身拆分，收藏夹作品加载拆至 `content/services/collect-works-loader.js`、侧边栏注入/展开收起/显示模式拆至 `content/services/sidebar-injector.js`，行为等价无功能变化，并修复新文件漏登记 manifest WAR 致侧边栏无法注入的问题；更早：收藏夹作品加载链路专项修复：进度提示带收藏夹名与字段名兼容、下载状态缓存空值兜底、多收藏夹勾选串行化、刷新代数驱动的双层缓存与 forceRefresh、收藏夹下拉重复绑定修复；此前 2026-09-25 修复离线页收藏夹名为空→“未命名收藏夹”/作品数为0、侧边栏作者卡片“已存X/Y作品”不实时刷新、getAuthorDownloadStatus 关系查询方向反三处 bug；更早期 2026-09-23：离线收藏浏览页数据生成器/静态壳生成器已实现、入口定名 `FavGallery.html`、新增首屏看门狗友好引导）  
+> **本次续更新**: 2026-09-29（离线数据分片由「每次全量重写」改为「脏标记 + 仅重建受影响分片」的增量更新，全量仅保留在首次/空目录种子；详见「已完成的核心功能」第 44 条）  
+> **最近更新**: 2026-09-29（筛选与批量专项 + 决策抽离：① 刷新复位筛选 DOM 控件——`WorkListManager.setData` 只重置内部状态不同步控件，致“条件残留却不生效”，`event-binder` 新增 `resetFilterControls` 在加载后复位；② 作品卡片“已保存”改常驻可点作为单卡缺件补全入口（`completed` 态不再置灰，仅复选框禁用不纳入批量）+ 下载并发守卫；③ 批量选择对齐当前筛选结果，并把“选中当前页/全选”升级为规则型模式（`batchMode`），筛选/排序/搜索变动时对新展示集自动重算、取消筛选回退；④ 决策/执行分离——抽出纯模块 `utils/batch-selection.js`（可选项口径/主键/规则满足/当前页切片）+ 单测 `tests/batch-selection.test.js`；⑤ 单个保存日志不再误称“批量”；⑥ 批量缺件补全（校验补全）落地为作品列表批量作用域——因原生 select 无法单项高亮/重复点击切换，改自定义作用域下拉（`.batch-scope-dropdown`，生效项标蓝 + 再点取消）；选中「已保存（补全）」时联动锁定“已保存”筛选不可改、当前页已保存作品全勾选且复选框解禁可逐卡操作，退出/完成自动解锁；详见「已完成的核心功能」第 37-40 条）  
+> **此前更新**: 2026-09-28（三批：作者作品清单截断标注（新增纯函数 `resolveTruncation`，与软删除授权两套独立判定；hasMore 自 api.js 全链路透传至侧边栏独立提示行；上限沿用配置面板「作者作品」项可配）；作者作品钻取视图体验优化（进入即隐藏外层作者维度的刷新按钮/关注计数/搜索栏并锁定 Tab 切换、返回解除，去掉与顶部计数重复的状态行，「作者钻取」术语统一改「作者作品」，截断提示独立成行简短化）；修复按 maxCount 截断的钻取把作者分母从 299 误压成 50（`computeKnownWorkCount` 有清单时改 max(关系数,缓存)，守住「分母单调不减」，附回归单测）；DEVELOPMENT_RULES.md 新增第八节 WAR 注册规范 + 系统性核查无历史漏登记；清理 helpers.js 死代码；详见「已完成的核心功能」第 33-36 条）  
+> **更早**: 2026-09-27（二批：侧边栏分页对齐离线页（首/末页 + 跳至页输入框，四列表统一）并修复分页条换行、作品卡片显示发布时间、排序控件改自定义下拉（点已选维度即切升降）、布尔排序补时间次级键、Tab 顺序统一点赞→收藏→关注且侧边栏默认打开点赞、离线页排序升级为多维叠加 + 交互职责分离（v2.8）；一批：侧边栏排序 + 高级筛选完整版：作品三表（点赞/收藏/作者钻取）按时间/保存状态排序+升降切换、类型筛选（视频/图集）、点赞+收藏按作者多选筛选；标签筛选因依赖尚未实现的标签系统，单独排期）  
+> **更早期**: 2026-09-26（作者卡片下载计数专项：跨 origin 持久化修复 + 实时校正 + 主库合并写；同日：关注列表刷新双发 loaded bug 修复、钻取分页按钮复活 bug 修复、作者钻取 maxCount 接入配置面板、作者卡片统计行紧凑化 + 返回按钮蓝色主题；更早：P1 落地：侧边栏高级筛选基础版（保存状态+时间范围，点赞/收藏/作者作品钻取视图三处）+ 关注列表「🎬 作品」作者作品钻取子视图（只读卡片）+ 全局错误边界（提示条+日志，三上下文接入）+ 界面配置面板（Sidebar 可视化读写 config.json，backup 配置迁入配置文件，version 2）；同日早些时候：结构重构——content/main.js 瘦身拆分，收藏夹作品加载拆至 `content/services/collect-works-loader.js`、侧边栏注入/展开收起/显示模式拆至 `content/services/sidebar-injector.js`，行为等价无功能变化，并修复新文件漏登记 manifest WAR 致侧边栏无法注入的问题；更早：收藏夹作品加载链路专项修复：进度提示带收藏夹名与字段名兼容、下载状态缓存空值兜底、多收藏夹勾选串行化、刷新代数驱动的双层缓存与 forceRefresh、收藏夹下拉重复绑定修复；此前 2026-09-25 修复离线页收藏夹名为空→“未命名收藏夹”/作品数为0、侧边栏作者卡片“已存X/Y作品”不实时刷新、getAuthorDownloadStatus 关系查询方向反三处 bug；更早期 2026-09-23：离线收藏浏览页数据生成器/静态壳生成器已实现、入口定名 `FavGallery.html`、新增首屏看门狗友好引导）  
 > **评估版本**: v1.0.0  
 > **评估范围**: 所有核心业务功能
 
@@ -347,15 +350,15 @@
 | 时间范围筛选 | ✅ 100% | 完成 | 侧边栏筛选栏 date 起止，`sortTime \|\| createTime` 毫秒比较；离线页也有（列表内分页同步支持） |
 | 下载状态筛选 | ✅ 100% | 完成 | 保存状态下拉：全部/已保存/未保存（downloaded 语义为 isDownloaded===true） |
 | 作者作品钻取视图 | ✅ 100% | 完成 | 关注列表作者卡片「🎬 作品」→ 内存点赞+收藏合并按 workId 去重的只读作品列表，带同一套筛选栏；返回即隐藏并重置条件；返回按钮蓝色主题，分页按钮受 updatePaginationControls 边界守卫，加载数量上限 authorWorks.maxCount（默认200）已接入配置面板（v2026-09-26） |
-| 作者筛选 | ✅ 100% | 完成 | 点赞/收藏列表按作者多选过滤（从已加载作品聚合作者，下拉多选、命中任一即显示）；作者钻取为单作者无需，关注列表本轮未加栏（v2026-09-27） |
+| 作者筛选 | ✅ 100% | 完成 | 点赞/收藏列表按作者多选过滤（从已加载作品聚合作者，下拉多选、命中任一即显示）；作者钻取为单作者无需；关注列表为作者级、其下作品级钻取视图已具备筛选，作者级无需筛选栏（v2026-09-27） |
 | 作品类型筛选 | ✅ 100% | 完成 | 视频/图集（基于 isImagePost）；「音乐」因绝大多数作品都带 music 元数据无法单独判定，未列为独立类型（v2026-09-27） |
 | 排序功能（侧边栏） | ✅ 100% | 完成 | 作品三表（点赞/收藏/作者钻取）按 时间/保存状态 单维排序 + 升/降；排序控件为自定义下拉（原生 select 捕获不到重复选中），点已选中维度即切换升降；布尔排序（isDownloaded）补同向时间次级键保证切换必有可见变化（v2026-09-27） |
 | 多维叠加排序（离线页） | ✅ 100% | 完成 | 时间 + 保存状态可同时启用，按勾选顺序定优先级（先选为主键）；方框只管启用/停用，选项文本与箭头只管升/降；方向箭头不再置灰（v2.8，v2026-09-27） |
-| 标签筛选 | ❌ 0% | 未开始 | 依赖自定义标签系统（尚未实现），单独排期 |
+| 标签筛选 | 🟡 部分 | 话题标签已实现 / 自定义待排期 | 话题标签（从 `desc` 派生、不存表、生成端固化 `topics`）已在**离线页**落地：卡片只读多标签选择框 + 顶部可输入 OR 筛选（见「已完成」第 41 条，v2026-09-29）；自定义标签（用户写，需 `tags` 表）单独排期（见 DATABASE_SCHEMA.md 5.7） |
 
 实现位置：侧边栏 `utils/work-list-manager.js`（`setFilters`/`setSort`/`_applyQuery`/`_applySort`/`getAuthorOptions` 管线）+ `core/event-binder.js`（`_bindFilterBar`/`_setupSortDropdown`/`_bindPagination`/`refreshAuthorFilterOptions`）+ `ui/html/sidebar.html`（两行筛选栏 + 作者多选行）+ `core/list-display-manager.js`（加载后填充作者选项）+ `core/author-works-view.js`（钻取子视图）；离线页 `ui/local/index.js`（`state.sortOrder`/`sortDirs` + `syncSortUI`/`bindSort`）+ `ui/local/features.js`（`sortLevels`/`compareWorks`/`filterAuthors`）。
 
-**小计**: 侧边栏 7/8（仅标签筛选待标签系统），**完成度 90%**
+**小计**: 侧边栏 7/8（话题标签筛选已在离线页落地，仅剩侧边栏标签多选 + 自定义标签待排期），**完成度 90%**
 
 ---
 
@@ -460,12 +463,30 @@
 24. ✅ **作者卡片下载计数专项修复（v2026-09-26）** - 根因：Sidebar iframe（chrome-extension:// origin）与 Content（www.douyin.com）各自 import database.js 打开的同名库按 origin 物理隔离，Sidebar 直写 `database.save('authors')` 落影子库、Content 刷新读主库永远看不到 → 按作者下载完成后刷新计数回退为 0。修复三处：① 新增 `UPDATE_AUTHOR_DOWNLOAD_STATS` 消息桥接，持久化交回 Content 侧 `updateAuthorsDownloadStats`（先 get 合并再 save 防 put 覆盖丢字段）写主库，Sidebar 三处直写改桥接 `_persistAuthorStatsToContent`；② `getAuthorsDownloadStatusBatch` 统一实时计算 relations(work→author) ∩ completed_works（覆盖钻取/单卡保存两条不走作者维度累加的链路），并从逐作者 getByIndex 塌缩为 relations 单次 getAll + 内存 String 键分组（61 事务→2）；③ workCount 取 max(API aweme_count, 关系数) 防部分关系时总数缩小误报
 25. ✅ **列表刷新与分页交互 bug 修复（v2026-09-26）** - ① 关注列表刷新双发 loaded：`_loadListInternal` 的 `shouldSkipAPI` 分支内层发一次 loaded，`return` 后外层 `_loadList` 又发一次（关注数恰达 maxCount 缓存满必然命中）→ 列表二次渲染、批量状态请求翻倍；删内层发送统一由外层单发（同修点赞列表缓存满场景）。② 钻取分页按钮复活：`ui-state-manager.js` 的 `enableAllControlButtons` 对含 authorWorksPrev/NextPage 在内的 8 个分页按钮无条件 `disabled=false`，越过钻取视图自身分页边界（点击被 goToPage 越界守卫拦截后又立即置灰）；改为交回各 manager 的 `updatePaginationControls()` 按真实状态恢复、全局仅清 title
 26. ✅ **作者钻取数量上限接入配置面板 + 作者卡片可读性优化（v2026-09-26）** - ① `authorWorks.maxCount`（默认 200，380 作品只加载 200 的来源）接入界面配置面板：sidebar.html 新增 `cfgAuthorWorksMax` 输入框 + config-panel.js `FIELD_SPECS` 映射（1–10000），user-config 全遍历 LIST_CONFIGS 泛型读写无需专属代码；② 作者卡片统计行紧凑化：`👥x粉丝 | 👤y关注 | 🎬已存x/y?`（去数字与文字间空格、去「作品」二字），整行改 flex-wrap + 各指标 nowrap 原子段，`?` 与计数锁死同段不再孤立换行；③ 钻取视图返回按钮改蓝色主题（#1890ff 底 + 白字加粗）
-27. ✅ **侧边栏排序 + 高级筛选完整版（v2026-09-27）** - 扩展 WorkListManager 统一查询管线：filters 新增 type(视频/图集，基于 isImagePost)/authorIds(作者多选)，新增 sort{key,dir}与 setSort/_applySort（时间 sortTime||createTime / 保存状态 isDownloaded，升降序）/getAuthorOptions（按作品 author 聚合）；_applyQuery 按「关键词→保存状态→类型→作者→时间→排序」固定顺序，无筛选且无排序时 filteredData=null 保持原始顺序。event-binder._bindFilterBar 接线新控件 + 排序方向切换 + 重置纳入；新增 refreshAuthorFilterOptions 在加载后填充作者多选下拉（选项<2自动隐行）。三套筛选栏改 flex-wrap，点赞/收藏新增作者多选行。关注列表本轮未加筛选/排序栏（待后续）；标签筛选依赖标签系统（未实现）单独排期
+27. ✅ **侧边栏排序 + 高级筛选完整版（v2026-09-27）** - 扩展 WorkListManager 统一查询管线：filters 新增 type(视频/图集，基于 isImagePost)/authorIds(作者多选)，新增 sort{key,dir}与 setSort/_applySort（时间 sortTime||createTime / 保存状态 isDownloaded，升降序）/getAuthorOptions（按作品 author 聚合）；_applyQuery 按「关键词→保存状态→类型→作者→时间→排序」固定顺序，无筛选且无排序时 filteredData=null 保持原始顺序。event-binder._bindFilterBar 接线新控件 + 排序方向切换 + 重置纳入；新增 refreshAuthorFilterOptions 在加载后填充作者多选下拉（选项<2自动隐行）。三套筛选栏改 flex-wrap，点赞/收藏新增作者多选行。关注列表（作者级）无需筛选/排序栏（作者下作品级钻取视图已具备，层级不同）；标签筛选依赖标签系统（自定义标签未实现）单独排期
 28. ✅ **侧边栏分页对齐离线页 + 分页条单行修复（v2026-09-27）** - 四个作品列表（liked/bookmarked/following/authorWorks）分页条统一为「首页 ‹ 页码 › 末页 跳至 _ 页」：`utils/work-list-manager.js` 新增 firstBtn/lastBtn/jumpInput 引用与页码夹取，`core/event-binder.js` `_bindPagination` 通用接线（回车/失焦跳转、跳转后清空输入）；首/末页用文字而非图标（窄栏实测宽度已可容纳）；换行根因不是 CSS——`updatePagination` 运行时把页码 span 写回长文案「共 N 条 · 第 x/y 页」，而该 span 带 `white-space:nowrap` 不许折行→撑爆一行迫使 flex 换行，改精简为「第 x/y 页」（“共 N 条”由上方状态行承担）
 29. ✅ **作品卡片显示发布时间（v2026-09-27）** - `utils/work-card-renderer.js` 统计行点赞数后同排追加「🕒 YYYY-MM-DD HH:MM:SS」（取 `sortTime || createTime`，无时间整段省略），使按时间排序/筛选的结果可直观核对
 30. ✅ **排序控件改自定义下拉 + 布尔排序确定性（v2026-09-27）** - 原生 select 无法捕获「重复选中同一项」的切换交互 → 改 `_setupSortDropdown`（`${prefix}FilterSortTrigger`/`FilterSortMenu`，菜单项带当前方向箭头），点已选中维度即翻升/降，独立方向按钮并入下拉；筛选栏重排为两行（第一行 重置/排序/时间，第二行 类型/状态/作者）；「按保存状态排序」为二值比较，全列表同状态时稳定排序无可见变化 → `_applySort` 补同向时间次级键（与离线页 `compareWorks` 逐条同语义）
 31. ✅ **Tab 顺序统一点赞→收藏→关注 + 侧边栏默认页改点赞（v2026-09-27）** - 侧边栏 `ui/html/sidebar.html` 与离线页 `ui/html/my-collection.html` 的 Tab 按钮（及离线页 pane）同序；TabManager 与离线页 `switchTab` 均按 id/`data-tab` 取元素，换序零 JS 改动；默认激活三处联动：按钮 `active` + 面板 `display:none` 互换 + `core/app.js` 的 `currentActiveTab = 'liked'`（`download-handler` 按它路由停止/批量操作，不改会导致批量操作打到关注列表）
 32. ✅ **离线页排序升级为多维叠加 + 交互职责分离（v2026-09-27，v2.8）** - 旧缺陷：双复选框互斥，取消时间时把方向按钮 `disabled=true` 而互斥分支又关掉对方箭头，回落时无人恢复 → 时间箭头永久置灰；重构为 `state.sortOrder`（已启用维度，按勾选顺序定主次）+ `state.sortDirs`（各维度升/降，未启用也保留可预设），UI 一律由 `syncSortUI()` 从 state 单向反推且箭头不再 disabled（置灰类 bug 结构性消除）；职责拆分：方框 = 启用/停用，选项文本与箭头 = 只翻转升降不改选中；`ui/local/features.js` 新增 `sortLevels()`，`compareWorks()` 逐级比较（status 为末级时同向时间兜底、空 order 不排序保留生成顺序），`filterAuthors()` 取排序栈中首个 status 层级；已启用维度的文本/箭头高亮，title 展示「主键 / 第 N 优先级 / 未启用」
+
+33. ✅ **作者作品清单截断标注（v2026-09-28，第4步）** - 新增纯函数 `utils/worklist-truncation.js` 的 `resolveTruncation`（入参 sawEnd/partial/hasMore/loadedCount/maxCount → {truncated,reason}），与软删除授权 `resolveSoftDeletePolicy` 是两套独立的 sawEnd/partial 消费判定：前者只产出“提示清单不全”的展示信号、不改落库，partial=true 时刻意不标截断（交错误提示处理，避免把网络失败误报成作品太多）。证据链：`api/douyin/api.js` getAuthorWorksForList/ForDownload 结果数组补挂 `hasMore` → `list-config-factory` 作者作品分支透传 → `data-fetcher._loadListInternal` 调 resolveTruncation 挂载 cappedData.truncated/maxCount → `content/services/author-works-loader.js` 在 filter 前捕获（数组自定义属性会被 filter/postMessage 结构化克隆丢弃）、缓存改存 {works,truncated,maxCount}、AUTHOR_WORKS_LOADED 携带 → 侧边栏 `core/author-works-view.js` 展示。上限沿用配置面板「作者作品」项（v2026-09-26 已接入）。单测 `tests/authorworks-truncation.test.js`（13 断言）+ 浏览器实测通过
+34. ✅ **作者作品钻取视图体验优化（v2026-09-28）** - ① 进入钻取即隐藏“外层作者维度”元素（刷新关注列表按钮 loadFollowing、关注计数状态行 followingStatus、关注搜索栏容器），连同原有作者列表/分页/批量栏一并收起，返回时恢复；② 期间锁定 Tab 切换（`TabManager.lock()/unlock()`：三 Tab 按钮置灰 disabled + pointer-events:none，并在 switchTab 加 locked 兜底拦截），防切走丢失钻取上下文；③ 去掉与顶部计数重复的“共 N 个TA的作品，共 M 页”状态行——钻取专用 WorkListManager 传新选项 `renderStatus:false`（updateStatus 短路），计数改由顶部 authorWorksCount + 独立截断标注行承担，loading/error 仍走视图 _setStatus；④ 术语「作者钻取」统一改为「作者作品」（配置面板标签 + 提示文案，字段 id cfgAuthorWorksMax 与 FIELD_SPECS 映射不变）。浏览器实测通过
+35. ✅ **修复按上限截断的钻取把作者分母误缩小（v2026-09-28）** - 现象：作者实际 299、上限设 50，点作品进入再返回后卡片由“已存 0/299”错变“0/50”。根因：authorWorks 列表加载会落 works 表并建 work→author 关系，返回时 `applyAuthorStatuses` 经 QUERY_AUTHORS_STATUS_BATCH 取到关系数=50 传入 `utils/author-completion.js` 的 `computeKnownWorkCount`，旧实现 `relation>0 ? relation : max(cached,api)` 用截断后的 50 覆盖了原 299，违反“分母单调不减”。修复：`relation>0 ? Math.max(relation,cached) : Math.max(cached,api)`（cached=author.workCount 是上轮已确立的单调值，与关系数取大即防缩小；保留 relation>0 时平台计数不参与，维持私密/审核作品不虚抬分母的既有场景）。附回归单测场景 F（`tests/author-completion.test.js`）。测试台全通过 + 浏览器实测通过。边界：仅防未来，已被污染存量需调高上限重钻补满关系数才自愈
+36. ✅ **MV3 资源注册规范文档化 + 死代码清理（v2026-09-28）** - `docs/DEVELOPMENT_RULES.md` 新增第八节「MV3 资源注册规则（web_accessible_resources）」：讲清 content/main.js 以 module 注入 MAIN world、注入链 import 闭包每个 .js 必须登记 WAR、漏一个即整链加载失败侧边栏打不开；列出必须登记范围与豁免项（content/index.js、background.js、tests/*）；附可复现自查命令（awk 隔离 resources 段 + globstar 枚举磁盘 + LC_ALL=C comm 求差）。系统性核查确认历史无漏登记（唯一真漏为新增的 utils/worklist-truncation.js，已补）。另清理 `utils/helpers.js` 遗留死代码 mergeDataWithCache/mergeWorkData（约 110 行，Grep 确认无引用；CONFIG 仍被 smartIncrementalFetch 使用保留）
+
+37. ✅ **刷新复位筛选控件（v2026-09-29，Bug1）** - 现象：作品列表选好筛选/排序条件后点刷新，条件从界面看仍在却不生效。根因：`utils/work-list-manager.js` `setData()` 只重置内部 filters/keyword/sort/currentPage 并重渲全量，不回写 DOM 控件 → “残留显示、语义已失效”。修复：`core/event-binder.js` 新增 `resetFilterControls(prefix)`（复位 `{prefix}FilterSaved/FilterType/FilterFrom/FilterTo/SearchInput` + `sortDropdowns[prefix].reset()`，仅同步 DOM、不触发 applyFilters），`core/list-display-manager.js` 在 `handleLikedWorksLoaded`/`handleCollectWorksLoaded` 的 `initElements()` 后各调用一次；语义定为“刷新 = 重置所有查询条件”（作者多选由 refreshAuthorFilterOptions→updateData 静默清空）。同日追加：`_bindFilterBar` 的「重置」按钮清空筛选/排序后额外调 `batchSelectionManager.clearSelection(manager.type)`（连规则型 `batchMode` 一并清除，随后 `applyFilters` 内 `reapplyBatchMode` 因 batchMode=null 短路、不整页回选），使「重置 = 查询条件 + 批量选择一并归零」。浏览器实测通过
+38. ✅ **作品卡片单卡缺件补全入口（v2026-09-29，Bug2）** - 背景：第5步已落地“逐文件核对补下”，但已保存作品的卡片按钮 `disabled` → 被 event-binder `!downloadBtn.disabled` 拦截，删本地非首图后无法在卡片层再触发补全。修复：`utils/work-card-renderer.js` 把“✅ 已保存”按钮改为常驻可点（cursor pointer + tooltip“点击检查并补全缺失的文件”，保留‘已保存’子串使状态机继续跳过其复选框、不纳入批量）；`core/download-handler.js` `_setWorkDownloadStatus` 与 `ui/ui-state-manager.js` `setWorkDownloadStatus` 的 `completed` 分支由 `disabled=true` 改回可点（单卡下载不重渲整表，否则同渲染内二次点击被吞，即 2-A/2-B“没反应”回归）；`core/event-binder.js` 点击下载处加 `downloadHandler.isDownloading` 并发守卫，防批量进行中误点抢占 content 侧 currentBatchManager。只做单卡级补全，批量补全开销大留待后续。浏览器实测通过
+39. ✅ **批量选择对齐筛选结果 + 规则型联动 + 决策抽离（v2026-09-29，Bug3 + 抽离）** - ① 修 Bug3：`core/batch-selection-manager.js` 批量选择数据源原写死 `manager.allWorks/allAuthors`（筛选前全量），改为 `_getDisplayedItems(listType)` 取 `filteredData || 全量`，与渲染取数口径 `getCurrentPageData` 一致；② “选中当前页/全选”升级为规则型模式 `state.batchMode('current'|'all'|null)`：新增 `reapplyBatchMode(listType)`，在筛选/排序/搜索三条汇聚路径（`applyFilters`/`_bindSearchInput`/`_bindAuthorSearchInput`）数据变化后按新展示集重算选中（当前页∩筛选 / 全部∩筛选，取消筛选自动回退），手动逐个勾选（`handleCheckboxChange`）解除规则；③ 决策/执行分离：抽出零依赖纯模块 `utils/batch-selection.js`（`getIdKey`/`isItemSelectable`/`getSelectableItems`/`getSelectableIds`/`isRuleSatisfied`/`sliceCurrentPage`），manager 的 4~6 处重复口径统一改用之，`selectCurrentPage`/`selectAllItems`/`getCurrentPageItems` 合并 following/works 双分支（净减约 136 行）；④ 新增单测 `tests/batch-selection.test.js`（6 组，含主键/可选性/规则满足/切片边界）并在 `tests/test-runner.js` 注册；`utils/batch-selection.js` 登记 manifest WAR（sidebar 模块链）；⑤ 单个保存日志不再误标“批量”：Sidebar `handleBatchDownloadComplete` 按 `result.progress.total` 取词，Content 侧 `content/main.js`（收到请求/开始/完成）与 `download/batch-download-manager.js`（开始/完成）同步按数量取词，仅 >1 才称“批量下载”。GetProblems 全绿；测试台（tests/index.html 第 6 步）与浏览器实测（含重置清空批量选择、Content 侧日志按数量文案）均通过
+40. ✅ **批量缺件补全（校验补全）+ 自定义作用域下拉（v2026-09-29）** - 把已落地于单卡路径的“逐文件核对补下”能力提升为作品列表的批量作用域，复用同一下载管线（`BatchDownloadManager.startWithIds` 不过滤 `isDownloaded`，完整件自动 skipped、缺件只补缺）。因“可选项闸门”在选择层，且需“单项高亮当前作用域 + 再次点同项取消 + 补全态锁定筛选”，而原生 `<select>` 无法给单项上色也捕捉不到“重复选同一项”，改自建下拉：① `ui/html/sidebar.html` 4 个 `{prefix}BatchSelect` 换 `.batch-scope-dropdown` 结构，`ui/css/sidebar.css` 新增作用域下拉样式（生效项标蓝 + ✓）；触发器固定宽 118px + 标签 `text-overflow:ellipsis` 兑底，消除选「已保存（补全）」时的整行抖动；② `core/event-binder.js` 新增 `_buildBatchScopeDropdown(listType,isWorks)` + `_onBatchScopePick`（选中/切换/取消三态）：进入 `saved` 时置 `manager.backfillMode=true`（渲染解禁已保存作品复选框）+ `state.batchMode='saved'` 走 `reapplyBatchMode` 全勾选当前页已保存作品，并把“状态”筛选锁为“已保存”；退出/切换/清空自动解锁并恢复全量；`_onWorksBatchButtonClick` 按补全态弹 `showConfirmModal`（`utils/ui-helpers.js` 新增通用确认框）说明作用与“仅当前页”原因；③ `utils/work-card-renderer.js`/`utils/work-list-manager.js` 渲染按 `intent`（download/backfill）决定复选框禁用与勾选；`_updateFilterBarState` 在 `backfillMode` 下自愈强制 `FilterSaved` 为“已保存”且不可改（分页/重渲后仍锁定）；④ `core/batch-selection-manager.js` 新增独立 `state.activeScope` 承载高亮（手动逐卡勾选不清高亮，独立于 `batchMode`），`clearSelection` 复位 + `app.batchScopeRenderers/Unlockers` 钩子回驱下拉高亮/筛选解锁；`updateBatchSelectionUI` 按 `backfillMode` 切换按钮文案“校验补全/批量保存”；移除旧 `_onWorksBatchSelectChange`/`selectSavedCurrentPage`（改由 event 层编排 + reapply）；⑤ `utils/batch-selection.js` 4 个纯函数新增 `intent='download'|'backfill'` 口径（backfill 反转为仅已保存可选），`tests/batch-selection.test.js` 新增第 [7] 组断言。GetProblems 全绿；测试台（tests/index.html 第 6 步）与浏览器实测（含筛选锁定不可改、当前页已保存全勾选且可逐卡勾选/取消、补全完成/取消自动解锁、下拉标蓝与二次点击取消、整行无抖动）均通过
+
+41. ✅ **离线页话题标签（从 `desc` 派生、只读筛选，v2026-09-29）** - 职责：侧边栏=下载、离线页=管理；不新增表（符合 DATABASE_SCHEMA.md 5.7“话题不存表、由 desc 派生”决策）。**生成端**：`utils/topic.js` 纯函数 `extractTopics(desc)`（正则 `[＃#][^\s＃#，。！？、；：,.!?;:]+`，全/半角 ＃ 均识别、裁尾部标点、去 `#` 前缀、去重，覆盖紧邻多话题 `#A#B`，单测 `tests/topic.test.js`）→ `data/export/offline-record-builder.js` 生成离线记录时固化 `topics: extractTopics(work.desc)`。**消费端（离线页，file:// 经典脚本无法 import，故 core.js 内联同边界的 `stripTopicTokens`）**：`ui/local/core.js` 把每个作品的 topics 渲染为**只读“多标签选择框”**（复现侧边栏「选择收藏夹」右侧框、去掉左侧下拉）——固定两行高、超出不拉高卡片；`refitTopicBoxes` 插入 DOM 后用 `scrollHeight>clientHeight` 标记 `.has-more` 显底部渐隐提示；点击框体本身切为绝对定位向下展开、覆盖音频/操作等下方组件显示全部（外层 `.card-topics-wrap` 固定占位防卡片回流），点框内 chip 叠加筛选并收起、点框外收起；有 topics 时从描述展示中剔除 `#xxx` 避免与 chips 重复；折叠/展开态均隐藏可见滚动条。**筛选**：`ui/local/features.js` 按 `state.topics` 做 **OR（命中任一）** 过滤；`ui/local/index.js` 顶部「话题」为**可输入多标签选择器**（输入框 + `datalist` 候选 + 回车/逗号提交 + 空输入退格删末个 + 「✕ 清除」+ chip `×` 单删），`commitTopicInput` 中/英文逗号均可切分（`input` 监听兜住输入法上字与粘贴），`ensureTopicFilterBar()` 运行时注入以兜底旧缓存 html。**静态壳强制干净覆盖**：`data/export/offline-shell-generator.js` 写前先 `removeDirectory('.FavGallery/resources/offline-viewer')` + `removeFile('FavGallery.html')`（清除已不在 `SHELL_FILES` 映射表内的历史残留），`data/storage/file-system.js` 新增 `removeFile`/`removeDirectory(recursive)`，配合 `?v=` 缓存击穿根治 file:// 新旧混跑导致的“两段标签”。另保留防御性 CSS `.topics-all/.topics-caret{display:none!important}` 兜底旧产物。浏览器实测通过。剩余：自定义标签（用户写、需 `tags` 表 + `relations`，离线页无回写通道，定为“扩展写、离线页读”）与侧边栏标签多选筛选仍单独排期
+
+42. ✅ **机制二废弃 + 死代码清理 + 关注列表/批量补全定位收敛（v2026-09-29）** - ① 机制二（用户主动本地删除作品 → removeRelation 物理删边 + 精准清理单条 completed_works）经评估**废弃**：用户只可能物理删除本地文件，不会精准清理 completed_works 某一条；即便误删整表也有备份还原系统兜底，且本地文件从不从库还原、库也从不从本地文件还原，两侧互不污染、基本不会出问题。校验补全（第 40 条）已覆盖“删了本地想再补回”的真实场景。据此删除 `data/database/relation-manager.js` 的预留件 `hasRelation`（Grep 确认仅定义 + 默认导出、无任何调用方，纯死代码）并去技术债 #1。② 关注列表**作者级**明确不加筛选/排序栏——作者下的作品级（钻取视图）已具备同款能力，与点赞/收藏的作品列表非同一层级，补作者级冗余（订正第 27 条与 7.2 表「作者筛选」行的「待后续」表述为「作者级无需」）。③ 「跨全部分页的批量缺件补全」需求级别低，由 P1 降为 **P3**（当前单卡 + 当前页补全已够用）。文档同步：预留区删机制二项、技术债删 hasRelation 项、P3 增批量补全项
+
+43. ✅ **离线页诊断日志（页内可见 + localStorage 持久化，v2026-09-29）** - 背景：离线页 file:// 此前只有零散 `console.*`、无全局错误兜底，历史“两段标签”类问题只能靠猜 file:// 缓存定位、留痕缺失。**能力边界**：file:// 经典脚本无回写磁盘通道（与自定义标签“扩展写、离线页读”同一约束；`utils/file-logger.js` 依赖扩展侧 `rootDirectoryHandle`，离线页拿不到），故不落盘、改为“页内可见 + 跨刷新持久”。**实现**：`ui/html/my-collection.html` 的 `<head>` **内联诊断模块**（先于外部脚本执行以捕获最早加载错误；内联故零新增文件、不动 SHELL_FILES/WAR）——`window.__favGalleryDiag`：200 条内存环形缓冲 + `localStorage`（键 `favGalleryDiagV1`、1s 节流持久、跨重开不丢）+ 全局 `error`(捕获阶段)/`unhandledrejection` 捕获 + 右下角 `🐞` 浮动面板（实时列表/复制/清空/错误计数）。**分类去噪**：`error` 捕获区分资源 vs 运行时——`<img>` 失败（离线裂图属预期、页内已灰底兜底）直接不记录；`<script>/<link>` 失败降级为 `warn` 且带 URL、同源只记一次（防刷屏）；真正 JS 运行时错误才 `error`（带 message + 文件:行:列）。**集中镜像**：`ui/local/core.js` 头部一次性包装 `console.warn/error` → 同步写入缓冲，自动覆盖 core/features/index 全部告警点、无需逐处改；样式进 `ui/css/my-collection.css`（`.fg-diag-*`）。浏览器实测：面板正常，原被误记为“8 错误”的封面裂图经分类后消除。真正落盘到 `.FavGallery/logs` 记为 P3（见优先级第 6 条）
+
+44. ✅ **离线数据分片增量更新（全量重写 → 仅重建受影响分片，v2026-09-29）** - 背景：原 `generateOfflineData()` 每次触发都从 IndexedDB 全量读五张表、全库重算、覆盖所有分片文件（O(N)，10 万级达分钟级，且与下载并发撞 `_isGenerating` 锁致新触发被丢弃、短暂陈旧）。**用户决策**：数据分片「只增量更新、不覆盖重写」，全量仅保留在「目录空/首次种子」；测试阶段不做版本迁移（改记录格式如新加的 `duration` 字段靠「删离线目录 + 重选文件夹重生成」自然生效）。**实现**（新增 `data/export/offline-delta.js`）：① `markOfflineDirty(workIds, buckets?)` 把「变更作品 + 涉及分片桶」登记进 `settings` 表一条 `offline-delta`（`database.get/save` 直连、绕开 `setSetting` 的备份抖动；全程 try/catch 永不抛错打断主流程）；② `flushOfflineDelta()` 合并处理脏清单——按当前库真值**只重建受影响分片**（点赞月份片/作者片/收藏夹片各按 `database.getByIndex('relations','target',…)` 取成员 → `buildWorkRecord` → 排序 → `serializeForBrowser` 覆盖该单片；成员空则 `removeFile` 避免陈旧），其余分片文件不动；聚合小文件（`authors/index.js`、平台 `manifest.js`、跨平台 `offline-index.js`）只读**小对象表**（relations/authors/collects/completed_works，**不读 works 对象**）重算，`search-index.js` 按脏 workId **定点增/改/删**（逐条 `get('works',id)` 取 desc/nickname，维度优先级 点赞>收藏>作者）；带 `_flushing` 并发锁 + 处理期间新变更置 `_again` 补跑（≤5 轮）；③ `ensureOfflineData()` 判「离线目录无 `manifest.js`」→ 走一次 `generateOfflineData` 全量种子，否则增量。**脏登记钩子收敛到数据层汇点**（杜绝漏挂）：`data/storage/works-manager.js` 三处 `save('works')`（点赞/收藏/作者刷新，含软删除）、`data/database/relation-manager.js` 的 `batchAddRelations`（新关系）+ `removeRelation`（删除前先取回关系读 `createdAt` 记下被移除的桶——否则关系删掉后无法反查该清理哪个月份片）、`data/database/database.js` 的 `markAsDownloaded`（下载完成翻转 isDownloaded/本地路径，用**动态 `import`** 打破 offline-delta↔database 静态循环）。**触发**：选文件夹 `ensureOfflineData`（替换原 `_refreshOfflineData` 内部实现；静态壳 `_generateOfflineShell` 不变，仍每次覆盖，本就仅选文件夹触发、成本可忽略）；批量/作者下载完成 `flushOfflineDelta`（把此前一轮误删的自动触发以增量形式加回）。`serializeForBrowser/parseBrowserFile/OFFLINE_VARS/getOfflineBaseDir` 由 `offline-data-generator.js` 私有改 `export` 供复用；`offline-delta.js` 登记 manifest WAR。GetProblems 全绿。**浏览器实测**：首次选文件夹 `🆕 离线数据目录为空，执行首次全量种子生成`；下一个作品后 `♻️ 离线增量刷新完成…重建分片:1`（仅重建受影响 1 片，其余分片 mtime 不变，证明未全量重写）。**遗留优化**：单次 flush 仍会 `getAll` 若干小对象表（relations/completed_works/authors/collects）以精确重算聚合计数，实测某账号规模下「重建 1 片」耗时约 39s，主因即这些全表读 + 磁盘 I/O（非 works 重算）；后续可把计数改为纯 delta 增量维护或按受影响维度局部统计以进一步压开销（本轮优先正确性，暂不做）。
 
 ### 部分完成的功能（⚠️ 50%-90%）
 
@@ -477,17 +498,18 @@
 
 ### 预留/规划中功能（已归档，待排期）
 
-1. 🔜 **机制二：用户主动本地删除作品** - 界面手动删除已下载作品时 removeRelation 物理删边 + 同步清 completed_works（罕见场景，低优先；详见 DATABASE_SCHEMA.md relations 表设计说明）
-2. 🟡 **离线收藏浏览页（FavGallery.html）** - 选文件夹时自动生成、可脱离扩展双击打开的静态浏览页（平台多级分页 + 点赞/作者/收藏夹 + 本地封面/点开本地视频 + 搜索/筛选/排序）。面向 40 万作品量级，采用三维分片（作者/点赞按月/收藏夹）+ 懒加载 + 自包含分片架构。数据生成器与静态壳生成器已实现（选文件夹自动生成 `FavGallery.html` + `resources/offline-viewer/*`），并新增首屏看门狗友好引导（首次使用尚未生成数据时不再无限转圈）；2026-09-25 修复收藏夹名被 put 覆盖导致“未命名收藏夹”/作品数为0、作者卡片“已存X/Y”不刷新等显示 bug；2026-09-26 补齐作品视图列表内分页（页码条/每页数量/时间筛选/跳至页输入框）、顶部固定仅列表滚动布局、静态壳资源 ?v= 缓存击穿；同日 v2.6 落地全局搜索索引（search-index.js 懒加载跨分片检索）与观察 C（封面远程回退）/D（图集落盘校验）修复，实机验证已通过；v2.6.1 全局搜索结果独立视图化（蓝退出钮/Tab去高亮/来源标注，入口放开到三 Tab）；v2.7 搜索框多关键词小卡片（chip，回车/逗号固化、可单删，中/英文逗号均可叠加）；v2.7.1 多词匹配开关（已被 v2.7.2 替代）；v2.7.2 多词匹配定稿：分片内固定 OR、全局搜索固定 AND，仅文字提示不设开关；2026-09-27 v2.8 排序升级为多维叠加（时间+保存状态按勾选顺序定优先级，方框=启用/停用、文本与箭头=升降，方向箭头不再置灰）+ Tab 顺序统一点赞→收藏夹→作者（与侧边栏一致）；详见 OFFLINE_COLLECTION_VIEWER.md
+1. 🟡 **离线收藏浏览页（FavGallery.html）** - 选文件夹时自动生成、可脱离扩展双击打开的静态浏览页（平台多级分页 + 点赞/作者/收藏夹 + 本地封面/点开本地视频 + 搜索/筛选/排序）。面向 40 万作品量级，采用三维分片（作者/点赞按月/收藏夹）+ 懒加载 + 自包含分片架构。数据生成器与静态壳生成器已实现（选文件夹自动生成 `FavGallery.html` + `resources/offline-viewer/*`），并新增首屏看门狗友好引导（首次使用尚未生成数据时不再无限转圈）；2026-09-25 修复收藏夹名被 put 覆盖导致“未命名收藏夹”/作品数为0、作者卡片“已存X/Y”不刷新等显示 bug；2026-09-26 补齐作品视图列表内分页（页码条/每页数量/时间筛选/跳至页输入框）、顶部固定仅列表滚动布局、静态壳资源 ?v= 缓存击穿；同日 v2.6 落地全局搜索索引（search-index.js 懒加载跨分片检索）与观察 C（封面远程回退）/D（图集落盘校验）修复，实机验证已通过；v2.6.1 全局搜索结果独立视图化（蓝退出钮/Tab去高亮/来源标注，入口放开到三 Tab）；v2.7 搜索框多关键词小卡片（chip，回车/逗号固化、可单删，中/英文逗号均可叠加）；v2.7.1 多词匹配开关（已被 v2.7.2 替代）；v2.7.2 多词匹配定稿：分片内固定 OR、全局搜索固定 AND，仅文字提示不设开关；2026-09-27 v2.8 排序升级为多维叠加（时间+保存状态按勾选顺序定优先级，方框=启用/停用、文本与箭头=升降，方向箭头不再置灰）+ Tab 顺序统一点赞→收藏夹→作者（与侧边栏一致）；详见 OFFLINE_COLLECTION_VIEWER.md
+
+2. 🔜 **自定义标签体系（用户写；离线页 file:// 无回写通道→“扩展写、离线页读”）** - 话题标签（只读派生、不存表）已于 v2026-09-29 在离线页落地（见「已完成」第 41 条）；仍待实现的是自定义标签：`tags` 表 + `relations` 存 `work→tag`，需扩展侧提供写入 UI 与持久化，优先度极低、单独排期（见 DATABASE_SCHEMA.md 5.7）
 
 ### 未完成的功能（❌ 0%）
 
-1. ❌ **高级筛选 - 仅剩标签筛选** - 排序/作者/类型已完成（v2026-09-27，见 7.2）；标签多选筛选依赖尚未实现的标签系统，单独排期
+1. ❌ **高级筛选 - 仅剩侧边栏标签多选 + 自定义标签** - 排序/作者/类型/时间/状态已完成（v2026-09-27，见 7.2）；话题标签筛选已在离线页落地（从 desc 派生，v2026-09-29，见第 41 条）；侧边栏标签多选与自定义标签依赖 `tags` 表，单独排期
 2. ❌ **B站平台支持** - 0%，需从头实现
 3. ❌ **快手平台支持** - 0%，需从头实现
 4. ❌ **TikTok平台支持** - 0%，需从头实现
 5. ❌ **数据可视化** - 统计图表待开发
-6. ❌ **标签系统** - 自定义标签待开发
+6. ❌ **自定义标签系统** - 话题标签（从 `desc` 提取 `#xxx`、只读派生不存表）已实现（离线页，v2026-09-29，见第 41 条）；仍缺自定义标签（用户写，需 `tags` 表 + 复用 `relations`，优先度极低、单独排期）；存储决策见 DATABASE_SCHEMA.md 5.7
 7. ❌ **单元测试** - 测试框架待搭建
 8. ❌ **国际化** - 多语言支持待实现
 
@@ -505,6 +527,14 @@
 
 （已完成 2026-09-27：侧边栏排序 + 高级筛选完整版（第 27 条）；同日二批：侧边栏分页对齐离线页与分页条单行修复、作品卡片时间显示、排序改自定义下拉 + 布尔排序次级键、Tab 顺序与默认页、离线页多维叠加排序（第 28-32 条），均已实机验证通过）
 
+（已完成 2026-09-28：作者作品清单截断标注（第 33 条）；作者作品钻取视图体验优化——隐藏外层作者维度、锁定 Tab、去冗余状态行、术语改「作者作品」（第 34 条）；修复按上限截断误缩小作者分母、守住分母单调不减（第 35 条）；WAR 注册规范文档化 + 死代码清理（第 36 条），测试台与浏览器实测均通过）
+
+（已完成 2026-09-29：筛选与批量专项 + 决策抽离——刷新复位筛选控件（第 37 条）、作品卡片单卡缺件补全入口（已保存常驻可点 + completed 不置灰 + 下载并发守卫，第 38 条）、批量选择对齐筛选结果并升级为规则型模式随筛选/排序/搜索联动重算 + 抽出 `utils/batch-selection.js` 纯决策模块与单测（第 39 条），另追加「重置按钮清空批量选择」与「Content 侧下载日志按数量文案」两处打磨；随后落地批量缺件补全（校验补全）+ 自定义作用域下拉（单项标蓝/二次取消/补全态锁定筛选/固定宽防抖），见第 40 条；全部测试台 + 浏览器实测通过）
+
+（已完成 2026-09-29 续：离线页话题标签（从 desc 派生、只读、生成端固化 topics）——卡片只读多标签选择框（复现侧边栏选择收藏夹框、固定两行高、点框向下展开覆盖下方）+ 顶部可输入 OR 筛选（中英文逗号切分）+ 静态壳强制干净覆盖，见第 41 条；浏览器实测通过）
+
+（已完成 2026-09-29 续2：离线页诊断日志——内联模块内存环形缓冲 + localStorage 持久化 + 全局错误捕获 + 页内浮动面板，core.js 集中镜像 console.warn/error，资源/运行时分类去噪（裂图不记、脚本/样式降为 warn），见第 43 条；file:// 无回写磁盘通道故不落盘，“导出到磁盘”记 P3；浏览器实测通过）
+
 ### P2 - 中期规划（1-2月）
 
 1. **小红书平台实现** - 完成第二个平台支持
@@ -517,6 +547,8 @@
 2. **标签系统** - 完整的自定义标签管理
 3. **AI智能分类** - 基于内容的智能分类
 4. **云端同步** - 可选的云端备份功能
+5. **跨全部分页的批量缺件补全** - 现仅单卡 + 当前页补全已够用；全量跨页开销大、需求级别低（v2026-09-29 由 P1 降级）
+6. **离线页诊断日志导出到磁盘** - 现采用页内浮动面板 + localStorage 持久化（file:// 不落盘）；若需真正把诊断日志写进 `.FavGallery/logs/`，唯一可行路径是放弃 file:// 双击即用、改由扩展以 chrome-extension:// 打开离线页（代价较大），优先度极低、单独排期
 
 ---
 
@@ -524,10 +556,9 @@
 
 ### 已知问题
 
-1. **relation-manager.js** - 1处TODO标记（hasRelation，实为"机制二"用户主动本地删除的预留件，非单纯性能问题；详见 DATABASE_SCHEMA.md relations 表设计说明）
-2. **ui-state-manager.js** - 已无TODO标记（setLoadingState死代码已删除）
-3. **缺少单元测试** - 核心逻辑无自动化测试
-4. **TypeScript迁移** - 可考虑迁移增强类型安全
+1. **ui-state-manager.js** - 已无TODO标记（setLoadingState死代码已删除）
+2. **缺少单元测试** - 核心逻辑无自动化测试
+3. **TypeScript迁移** - 可考虑迁移增强类型安全
 
 ### 改进建议
 
@@ -551,9 +582,9 @@
 
 ### 扩展功能完成度：**30%**
 - 多平台支持：20% 🔴
-- 高级筛选：90% 🟡（排序/作者/类型已落地，离线页排序多维叠加，仅标签筛选待标签系统）
+- 高级筛选：90% 🟡（排序/作者/类型已落地，离线页排序多维叠加 + 话题标签筛选已实现，仅剩侧边栏标签多选与自定义标签）
 - 数据可视化：0% 🔴
-- 标签系统：0% 🔴
+- 标签系统：50% 🟡（话题标签 MVP 已落地：从 desc 派生、只读、离线页筛选，2026-09-29；自定义标签 0% 待排期）
 
 ### 工程质量：**90%**
 - 架构设计：100% ✅

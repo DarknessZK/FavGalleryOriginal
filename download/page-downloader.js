@@ -106,13 +106,19 @@ export class PageDownloader {
                 }
                 
                 async function downloadVideo(params) {
-                    const videoResponse = await fetch(params.videoUrl);
-                    if (!videoResponse.ok) {
-                        throw new Error('Video HTTP ' + videoResponse.status);
+                    // ✅ coverOnly：正片已在、仅缺封面时，只取封面，不重复拉视频（第 5 步缺件补下）
+                    let videoBlob = null;
+                    let size = null;
+                    if (!params.coverOnly) {
+                        const videoResponse = await fetch(params.videoUrl);
+                        if (!videoResponse.ok) {
+                            throw new Error('Video HTTP ' + videoResponse.status);
+                        }
+
+                        videoBlob = await videoResponse.blob();
+                        size = videoResponse.headers.get('content-length');
                     }
-                    
-                    const videoBlob = await videoResponse.blob();
-                    
+
                     let coverBlob = null;
                     if (params.coverUrl) {
                         try {
@@ -131,7 +137,7 @@ export class PageDownloader {
                         payload: {
                             videoBlob,
                             coverBlob,
-                            size: videoResponse.headers.get('content-length')
+                            size
                         }
                     }, '*');
                 }

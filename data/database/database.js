@@ -5,6 +5,7 @@
 
 import { CONFIG } from '../../config/constants.js';
 import { createLogger } from '../../utils/logger.js';
+import { buildDbName } from '../../utils/account-context.js';
 import { restoreManager } from '../backup/restore-manager.js';
 
 const logger = createLogger('Database');
@@ -15,9 +16,33 @@ const logger = createLogger('Database');
  */
 export class Database {
     constructor() {
-        this.dbName = CONFIG.DB_CONFIG.name;
+        // ✅ 账号维度库名：未绑定账号时落在 guest 兜底库（只允许全局偏好类设置），
+        //    选择文件夹确定身份后由 useAccount(uid) 切到 FavGallery_<uid> 专属数据区
+        this.accountUid = null;
+        this.dbName = buildDbName(null);
         this.dbVersion = CONFIG.DB_CONFIG.version;
         this.db = null;
+    }
+
+    /**
+     * ✅ 切换账号数据区（库名绑定 uid）
+     * 幂等：同一 uid 重复调用无副作用；换账号时主动关闭旧连接，
+     * 下次数据库操作经 _transaction → init() 按新库名重开（新库自动建齐 stores/索引）
+     *
+     * @param {string|number|null} uid - 当前登录账号 uid；空值回落 guest 库
+     */
+    useAccount(uid) {
+        const safeUid = String(uid || '').trim() || null;
+        if (this.accountUid === safeUid) {
+            return;
+        }
+        if (this.db) {
+            try { this.db.close(); } catch (_) { /* 忽略 */ }
+            this.db = null;
+        }
+        this.accountUid = safeUid;
+        this.dbName = buildDbName(safeUid);
+        logger.info(`🔑 数据库切换至账号数据区: ${this.dbName}`);
     }
 
     /**
@@ -344,6 +369,16 @@ export class Database {
      */
     async markAsDownloaded(workInfo) {
         await this.save('completed_works', workInfo);
+        // ♻️ 离线增量：下载完成使作品的 isDownloaded/本地路径翻转，登记脏使所属分片下次重建。
+        //    用动态 import 打破 offline-delta ↔ database 的静态循环依赖；失败不阻断下载。
+        try {
+            const { markOfflineDirty } = await import('../export/offline-delta.js');
+            const info = Array.isArray(workInfo) ? workInfo : [workInfo];
+            const ids = info.map(w => w && w.workId).filter(Boolean);
+            if (ids.length) await markOfflineDirty(ids);
+        } catch (e) {
+            logger.warn('⚠️ 登记下载完成离线增量失败（忽略）:', e?.message || e);
+        }
     }
 
     /**

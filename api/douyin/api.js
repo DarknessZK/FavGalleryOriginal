@@ -15,6 +15,7 @@
 // 3. 用户相关方法 (L150-236)
 //    - getCurrentUser()
 //    - _fetchUserInfoFromAPI()
+//    - getAuthorFollowStatus()  ✅ 新增：下载链路的取关单点取证
 // 4. 列表获取方法 (L238-480)
 //    - getFollowingList()
 //    - getLikedWorks()
@@ -46,6 +47,7 @@ import {
     delay
 } from '../../utils/platform-helpers.js';
 import { smartIncrementalFetch } from '../../utils/helpers.js';
+import { FOLLOW_STATE, parseFollowState } from '../../utils/follow-verification.js';
 import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('DouyinAPI');
@@ -187,6 +189,27 @@ export class DouyinAPI {
         throw new Error(`请求失败，已重试 ${maxRetries} 次: ${lastError.message}`);
     }
 
+    /**
+     * 单次请求（不做任何重试）
+     *
+     * 用在 smartIncrementalFetch 的分页回调里：重试由外层统一负责。
+     * 旧写法在此处再套一层 _requestWithRetry，与外层的 3 次重试形成 3×3 叠加，
+     * 断网时单个批次最多发出 9 次请求、耗时十几秒。
+     *
+     * @param {string} url - 完整请求地址
+     * @returns {Promise<Object>} 解析后的 JSON 数据
+     * @throws {Error} HTTP 失败或 API 状态码非 0 时抛出，交由外层重试
+     * @private
+     */
+    async _fetchOnce(url) {
+        const response = await fetch(url, {
+            method: 'GET',
+            credentials: 'include',
+            headers: this._buildRequestHeaders()
+        });
+        return this._handleAPIResponse(response);
+    }
+
     // ==========================================
     // 用户相关方法
     // ==========================================
@@ -269,6 +292,54 @@ export class DouyinAPI {
         }
     }
 
+    /**
+     * ✅ 查询当前账号是否仍关注指定作者（下载链路的取关单点取证）
+     *
+     * 为什么需要它：关注清单按“从新到旧”分页返回，且命中缓存即提前停止，
+     * 刷新链路永远只看到清单头部——取消关注的老作者检不出来。
+     * 改为按人单点确认后，证据不再依赖清单完整性，且成本只落在真要下载的作者身上
+     * （本来每位作者都要拉一次作品清单，多这一发是顺路的）。
+     *
+     * 三态返回，绝不把“拿不到结论”当成“已取关”：
+     *   FOLLOW_STATE.FOLLOWING  —— follow_status = 1
+     *   FOLLOW_STATE.UNFOLLOWED —— follow_status = 0
+     *   FOLLOW_STATE.UNKNOWN    —— 请求失败 / 字段缺失 / 取值不在已知枚举内
+     *
+     * @param {string} platformId - 作者的 sec_user_id
+     * @returns {Promise<string>} FOLLOW_STATE 之一
+     */
+    async getAuthorFollowStatus(platformId) {
+        if (!platformId) {
+            logger.warn('⚠️ [关注校验] 缺少 sec_user_id，状态不可判定');
+            return FOLLOW_STATE.UNKNOWN;
+        }
+
+        try {
+            const params = new URLSearchParams({
+                ...getDouyinDeviceParams(),
+                sec_user_id: platformId,
+                publish_video_strategy_type: '2',
+                source: 'channel_pc_web'
+            });
+
+            const url = `${DOUYIN_CONFIG.API_ENDPOINTS.USER_PROFILE}?${params}`;
+            // ✅ 单次请求不重试：失败即降级为未知，重试交调用方（下载流程本身有失败处理）
+            const data = await this._fetchOnce(url);
+
+            const state = parseFollowState(data);
+            if (state === FOLLOW_STATE.UNKNOWN) {
+                // 把实际取值打出来：抖音若存在 0/1 之外的关注状态枚举，靠这条日志识别后补口径
+                logger.warn(`⚠️ [关注校验] 响应无可用 follow_status，按未知处理: ` +
+                    `${JSON.stringify(data?.user?.follow_status ?? data?.follow_info?.follow_status ?? data?.follow_status)}`);
+            }
+            return state;
+        } catch (error) {
+            // ✅ 失败一律降级为未知：调用方据此照常下载，不打软删除标记
+            logger.warn(`⚠️ [关注校验] 查询关注状态失败，按未知处理: ${error.message}`);
+            return FOLLOW_STATE.UNKNOWN;
+        }
+    }
+
     // ==========================================
     // 列表获取方法
     // ==========================================
@@ -324,14 +395,8 @@ export class DouyinAPI {
 
             const url = `${DOUYIN_CONFIG.API_ENDPOINTS.FOLLOWING_LIST}?${params}`;
 
-            // 发送请求（带重试）
-            const data = await this._requestWithRetry(async () => {
-                const response = await fetch(url, {
-                    credentials: 'include',
-                    headers: this._buildRequestHeaders()
-                });
-                return this._handleAPIResponse(response);
-            });
+            // ✅ 单次请求：重试由 smartIncrementalFetch 统一负责，避免内外两层叠加
+            const data = await this._fetchOnce(url);
 
             // 更新游标（使用 min_time，参考旧项目实现）
             if (data.min_time !== undefined && data.min_time !== null) {
@@ -353,7 +418,7 @@ export class DouyinAPI {
 
         // 使用通用智能增量获取函数
         try {
-            const { items: users, hasMore } = await smartIncrementalFetch(
+            const { items: users, hasMore, sawEnd, partial } = await smartIncrementalFetch(
                 fetchBatch,
                 cachedIds,
                 'uid',
@@ -370,6 +435,8 @@ export class DouyinAPI {
             // ✅ 统一返回格式：使用 authors 字段（跨平台通用）
             return { 
                 authors: users,  // ✅ 统一使用 authors 字段
+                sawEnd,  // ✅ 清单完整性证据（上层据此判定是否有权做软删除）
+                partial, // ✅ 本轮是否存在重试耗尽的失败
                 hasMore,  // ✅ 使用真实的 hasMore（维持 isFullyLoaded 语义）
                 cursor: maxCursor, 
                 requestedCount: maxCount 
@@ -432,14 +499,8 @@ export class DouyinAPI {
             const url = `${DOUYIN_CONFIG.API_ENDPOINTS.LIKED_WORKS}?${params}`;
             logger.debug(`📤 [点赞列表] 请求 URL: ${url.substring(0, 150)}...`);
 
-            // 发送请求（带重试）
-            const data = await this._requestWithRetry(async () => {
-                const response = await fetch(url, {
-                    credentials: 'include',
-                    headers: this._buildRequestHeaders()
-                });
-                return this._handleAPIResponse(response);
-            });
+            // ✅ 单次请求：重试由 smartIncrementalFetch 统一负责，避免内外两层叠加
+            const data = await this._fetchOnce(url);
 
             logger.debug(`📥 [点赞列表] API 响应接收: ${(data.aweme_list || []).length} 条数据`);
 
@@ -467,7 +528,7 @@ export class DouyinAPI {
 
         // 使用通用智能增量获取函数
         try {
-            const { items: works, hasMore } = await smartIncrementalFetch(  // ✅ 改为 works
+            const { items: works, hasMore, sawEnd, partial } = await smartIncrementalFetch(  // ✅ 改为 works
                 fetchBatch,
                 cachedIds,
                 'workId',
@@ -481,7 +542,7 @@ export class DouyinAPI {
 
             logger.info(`[点赞列表] 获取 ${works.length} 个作品`);  // ✅ 改为 works
 
-            return { works, hasMore, cursor: maxCursor, requestedCount: maxCount };  // ✅ hasMore 使用真实值
+            return { works, hasMore, cursor: maxCursor, requestedCount: maxCount, sawEnd, partial };  // ✅ hasMore 使用真实值
 
         } catch (error) {
             logger.error('获取点赞列表失败:', error);
@@ -539,14 +600,8 @@ export class DouyinAPI {
             const url = `${DOUYIN_CONFIG.API_ENDPOINTS.BOOKMARKED_WORKS}?${params}`;
             logger.debug(`📤 [收藏列表] 请求 URL: ${url.substring(0, 150)}...`);
 
-            // 发送请求（带重试）
-            const data = await this._requestWithRetry(async () => {
-                const response = await fetch(url, {
-                    credentials: 'include',
-                    headers: this._buildRequestHeaders()
-                });
-                return this._handleAPIResponse(response);
-            });
+            // ✅ 单次请求：重试由 smartIncrementalFetch 统一负责，避免内外两层叠加
+            const data = await this._fetchOnce(url);
 
             logger.debug(`📥 [收藏列表] API 响应接收: ${(data.aweme_list || []).length} 条数据`);
 
@@ -574,7 +629,7 @@ export class DouyinAPI {
 
         // 使用通用智能增量获取函数
         try {
-            const { items: works, hasMore } = await smartIncrementalFetch(  // ✅ 改为 works
+            const { items: works, hasMore, sawEnd, partial } = await smartIncrementalFetch(  // ✅ 改为 works
                 fetchBatch,
                 cachedIds,
                 'workId',
@@ -592,7 +647,9 @@ export class DouyinAPI {
                 works,  // ✅ 改为 works
                 hasMore,  // ✅ hasMore 使用真实值
                 cursor: maxCursor,
-                requestedCount: maxCount  // ✅ 新增：添加 requestedCount
+                requestedCount: maxCount,  // ✅ 新增：添加 requestedCount
+                sawEnd,   // ✅ 清单完整性证据
+                partial   // ✅ 本轮失败标记
             };
         } catch (error) {
             logger.error('❌ [收藏列表] 获取失败:', error);
@@ -702,8 +759,14 @@ export class DouyinAPI {
             }
         }
 
-        // 返回截断到 maxCount 的结果
-        return allVideos.slice(0, maxCount);
+        // ✅ 附加清单完整性证据（数组属性不影响既有消费方式）
+        //    到底 = API 明确回复没有更多且未因上限截断；因重试耗尽而停时视为部分结果
+        //    hasMore：循环退出时平台仍报“有更多”即为 true，是“达上限被截断”的直接信号（供截断标注消费）
+        const result = allVideos.slice(0, maxCount);
+        result.hasMore = hasMore === true;
+        result.sawEnd = !hasMore && allVideos.length <= maxCount;
+        result.partial = retryCount >= maxRetries;
+        return result;
     }
 
     /**
@@ -775,7 +838,12 @@ export class DouyinAPI {
             }
         }
 
-        return allVideos.slice(0, maxCount);
+        // ✅ 同 getAuthorWorksForList：附带清单完整性证据，供上层判定是否有权做软删除、以及是否被上限截断
+        const result = allVideos.slice(0, maxCount);
+        result.hasMore = hasMore === true;
+        result.sawEnd = !hasMore && allVideos.length <= maxCount;
+        result.partial = retryCount >= maxRetries;
+        return result;
     }
 
     // ==========================================
@@ -847,6 +915,8 @@ export class DouyinAPI {
             return {
                 collects,
                 hasMore: data.has_more === 1 || data.has_more === true,
+                // ✅ 单页结果：仅当 API 明确回复没有更多时才算看到完整清单
+                sawEnd: !(data.has_more === 1 || data.has_more === true),
                 cursor: data.cursor || 0,
                 total: data.total || collects.length
             };
@@ -968,18 +1038,18 @@ export class DouyinAPI {
                 };
                 
             } catch (error) {
+                // ✅ 不再把失败伪装成“数据到底”
+                //    旧实现返回 { data: [], hasMore: false }，会被上层当成“清单已拉完且为空”，
+                //    进而把整个收藏夹的缓存条目标为已取消收藏并落库，离线页内容成批消失。
+                //    抛出后由 smartIncrementalFetch 重试，重试耗尽则如实标记 partial。
                 logger.error(`❌ 获取收藏夹作品失败:`, error.message);
-                return {
-                    data: [],
-                    hasMore: false,
-                    cursor
-                };
+                throw error;
             }
         };
         
         // 使用通用智能增量获取函数
         try {
-            const { items: works, hasMore } = await smartIncrementalFetch(
+            const { items: works, hasMore, sawEnd, partial } = await smartIncrementalFetch(
                 fetchBatch,
                 cachedIds,
                 'workId',
@@ -993,7 +1063,7 @@ export class DouyinAPI {
             
             logger.info(`[收藏夹] 获取 ${works.length} 个作品`);
             
-            return { works, hasMore, cursor };
+            return { works, hasMore, cursor, sawEnd, partial };
             
         } catch (error) {
             logger.error('获取收藏夹作品失败:', error);

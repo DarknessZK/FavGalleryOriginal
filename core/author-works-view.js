@@ -20,7 +20,8 @@ class AuthorWorksView {
         this.app = app;
 
         // ✅ 钻取视图专用列表管理器（分页/搜索/筛选全部复用其管线）
-        this.manager = new WorkListManager({ type: 'authorWorks' });
+        // renderStatus:false → 不渲染内置“共 N 个TA的作品，共 M 页”状态行（已由顶部计数 + 截断标注替代）
+        this.manager = new WorkListManager({ type: 'authorWorks', renderStatus: false });
 
         this.currentUid = null;
     }
@@ -34,8 +35,10 @@ class AuthorWorksView {
     async open(uid, nickname, platformId = '') {
         this.currentUid = uid;
 
-        // 1) 视图切换：隐藏作者列表/分页/批量栏，显示钻取块（flex 纵向布局，内部列表独享滚动）
+        // 1) 视图切换：隐藏外层作者维度元素（刷新按钮/计数提示/搜索栏/列表/分页/批量栏），显示钻取块
         this._setAuthorAreaVisible(false);
+        // ✅ 钻取期间锁定 Tab 切换（下方作品列表属于关注 Tab 内部子视图，切走会丢失钻取上下文）
+        this.app.tabManager?.lock();
         const view = document.getElementById('authorWorksView');
         if (view) view.style.display = 'flex';
 
@@ -44,7 +47,7 @@ class AuthorWorksView {
         if (titleEl) titleEl.textContent = `🎬 ${nickname || 'TA的作品'}`;
         const countEl = document.getElementById('authorWorksCount');
         if (countEl) countEl.textContent = '';
-
+        this._setTruncNote(''); // ✅ 清空上一个作者残留的截断标注
         this.manager.initElements();
         this.manager.setData([]); // 进入即重置上次的筛选/搜索状态
         // ✅ setData 只重置内部状态不重渲染，同步清空上一个作者残留的卡片 DOM
@@ -97,6 +100,8 @@ class AuthorWorksView {
         this.app.batchSelectionManager?.clearSelection('authorWorks');
 
         this._setAuthorAreaVisible(true);
+        // ✅ 退出钻取：解除 Tab 切换锁定
+        this.app.tabManager?.unlock();
 
         // 恢复作者列表渲染
         const followingManager = this.app.followingManager;
@@ -137,12 +142,20 @@ class AuthorWorksView {
 
         const countEl = document.getElementById('authorWorksCount');
         if (countEl) countEl.textContent = `共 ${works.length} 个作品`;
+        // ✅ 截断标注：单独成行展示（不塞进顶部 nowrap 计数 span，否则窄侧边栏会裁切看不到），
+        //    并给出可执行的解法（调高「作者作品」上限 + 刷新关注列表作废会话缓存后重进）
+        this._setTruncNote(data.truncated
+            ? `⚠️ 仅显示最新 ${works.length} 个（已达上限，TA 可能还有更多）；在 ⚙️ 配置 调高「作者作品」上限并刷新关注列表后重新查看可加载全部`
+            : '');
 
         this.manager.setData(works);
 
         // 下载状态标注（支撑「已保存/未保存」筛选语义）
         await this.app.refreshListDownloadStatus(this.manager);
         this.manager.updateUI();
+
+        // ✅ 本视图已禁用 manager 状态行渲染（renderStatus:false），此处清空 open() 期间残留的 loading 文案
+        if (this.manager.elements.status) this.manager.elements.status.innerHTML = '';
 
         logger.info(`🎬 钻取渲染完成: ${works.length} 个作品`);
     }
@@ -155,6 +168,7 @@ class AuthorWorksView {
         this._setStatus('error', `❌ 获取 TA 的作品失败：${data.error || '未知错误'}`);
         const countEl = document.getElementById('authorWorksCount');
         if (countEl) countEl.textContent = '';
+        this._setTruncNote('');
     }
 
     /**
@@ -162,6 +176,22 @@ class AuthorWorksView {
      */
     _isCurrent(uid) {
         return String(uid ?? '') === String(this.currentUid ?? '');
+    }
+
+    /**
+     * 截断标注独占行（authorWorksTruncNote）：有文案则显示，空则隐藏
+     * @param {string} text - 提示文案（空字符串清除并隐藏）
+     */
+    _setTruncNote(text) {
+        const el = document.getElementById('authorWorksTruncNote');
+        if (!el) return;
+        if (text) {
+            el.textContent = text;
+            el.style.display = '';
+        } else {
+            el.textContent = '';
+            el.style.display = 'none';
+        }
     }
 
     /**
@@ -175,14 +205,19 @@ class AuthorWorksView {
     }
 
     /**
-     * 作者列表区域显隐（列表/分页/批量栏）
+     * 外层作者维度区域显隐（刷新按钮 / 计数提示 / 搜索栏 / 列表 / 分页 / 批量栏）
+     * 钻取时整体隐藏（这些都是作者层元素，与作品子视图无关），返回时恢复
      * @param {boolean} visible
      */
     _setAuthorAreaVisible(visible) {
-        ['followingList', 'followingPagination', 'followingBatchActions'].forEach(id => {
+        const show = visible ? '' : 'none';
+        ['loadFollowing', 'followingStatus', 'followingList', 'followingPagination', 'followingBatchActions'].forEach(id => {
             const el = document.getElementById(id);
-            if (el) el.style.display = visible ? '' : 'none';
+            if (el) el.style.display = show;
         });
+        // ✅ 关注搜索框：隐藏其整块容器（避免残留空占位）
+        const searchWrap = document.getElementById('searchInput')?.parentElement;
+        if (searchWrap) searchWrap.style.display = show;
     }
 
     /**

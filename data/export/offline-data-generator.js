@@ -40,7 +40,7 @@ export const OFFLINE_VARS = {
  * @param {string} varName - 全局变量名
  * @returns {string} 可被 file:// 页面 script 安全加载的 JS 文本
  */
-function serializeForBrowser(data, varName) {
+export function serializeForBrowser(data, varName) {
     const json = JSON.stringify(data, (key, value) => (value instanceof Set ? [...value] : value));
     return `${varName} = ${JSON.stringify(json)};\n`;
 }
@@ -53,7 +53,7 @@ function serializeForBrowser(data, varName) {
  * @param {string} varName - 全局变量名
  * @returns {*} 解析后的数据，失败返回 null
  */
-function parseBrowserFile(content, varName) {
+export function parseBrowserFile(content, varName) {
     if (!content || content.trim() === '') return null;
     const eq = content.indexOf('=');
     if (eq < 0) return null;
@@ -72,7 +72,7 @@ function parseBrowserFile(content, varName) {
  * @param {string} platform - 平台标识
  * @returns {string} 形如 .FavGallery/metadata/douyin/offline
  */
-function getOfflineBaseDir(platform) {
+export function getOfflineBaseDir(platform) {
     return `${CONFIG.FILE_SYSTEM.METADATA_DIR}/${platform}/${CONFIG.FILE_SYSTEM.OFFLINE_DIR}`;
 }
 
@@ -122,20 +122,22 @@ function _computeAuthorStatus(workIds, completedMap) {
 
 /**
  * 生成作者维度分片：authors/index.js + authors/{uid}.js
+ * ✅ 作者列表与本地表保持一致：收录 authors 表全部作者（含无作品、已取关的），
+ *    与收藏夹维度同范式：无作品的条目不入分片文件（索引标 hasShard:false，离线页点击走空态）
  * @private
  */
 async function _generateAuthors(baseDir, authors, relByTarget, worksMap, completedMap, platform, generatedAt) {
-    const validAuthors = (authors || []).filter(a => !a.isDeleted);
     // 保持关注顺序（authors 表的 order 字段）
-    validAuthors.sort((a, b) => (a.order || 0) - (b.order || 0));
+    const allAuthors = (authors || []).slice();
+    allAuthors.sort((a, b) => (a.order || 0) - (b.order || 0));
 
     const authorsIndex = [];
     let worksWritten = 0;
     // ✅ 计数语义：“有已下载作品的作者数 / 作者总数”
     let downloadedAuthors = 0;
-    const totalAuthors = validAuthors.length;
+    const totalAuthors = allAuthors.length;
 
-    for (const author of validAuthors) {
+    for (const author of allAuthors) {
         const rels = relByTarget.get(`author:${author.uid}`) || [];
         const workIds = rels.filter(r => r.sourceType === 'work').map(r => r.sourceId);
         const status = _computeAuthorStatus(workIds, completedMap);
@@ -155,11 +157,14 @@ async function _generateAuthors(baseDir, authors, relByTarget, worksMap, complet
             }
             workRecords.push(buildWorkRecord(w, completedMap.get(id) || null, undefined, platform));
         }
-        // ✅ 无有效作品：既不写分片文件，也不进作者索引（作者维度只覆盖有下载作品的作者）
+
+        // ✅ 所有作者无条件入索引；无有效作品时不写分片，由 hasShard 标注（离线页据此走空态）
+        const record = buildAuthorRecord(author, status);
+        record.hasShard = workRecords.length > 0;
+        authorsIndex.push(record);
         if (workRecords.length === 0) {
             continue;
         }
-        authorsIndex.push(buildAuthorRecord(author, status));
         workRecords.sort((a, b) => (b.createTime || 0) - (a.createTime || 0));
         worksWritten += workRecords.length;
 

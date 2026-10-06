@@ -57,9 +57,31 @@
     }
 
     /**
+     * 视频时长档位（毫秒，与扩展侧 config/constants.js DURATION_BUCKETS 保持一致）
+     * 经典脚本无 import，此处内联副本；max 为包含上界，升序首个 max>=d 即命中（左开右闭）
+     */
+    const DURATION_BUCKETS = [
+        { key: 'le15', max: 15000 },
+        { key: 's15to60', max: 60000 },
+        { key: 'm1to3', max: 180000 },
+        { key: 'm3to10', max: 600000 },
+        { key: 'm10to30', max: 1800000 },
+        { key: 'm30to60', max: 3600000 },
+        { key: 'gt60', max: Infinity }
+    ];
+    /** 时长落档：ms 缺省/非法归 0 → ≤15秒档 */
+    function durationBucket(ms) {
+        const d = (ms && ms > 0) ? ms : 0;
+        for (let i = 0; i < DURATION_BUCKETS.length; i++) {
+            if (d <= DURATION_BUCKETS[i].max) return DURATION_BUCKETS[i].key;
+        }
+        return 'gt60';
+    }
+
+    /**
      * 对作品数组应用 筛选 + 搜索 + 排序（返回新数组，不修改原数组）
      * @param {Array} works
-     * @param {Object} state - { filter, keyword, sortOrder, sortDirs, dateFrom, dateTo }
+     * @param {Object} state - { filter, workType, durations, keyword, sortOrder, sortDirs, dateFrom, dateTo }
      */
     function applyFilterSortSearch(works, state) {
         if (!Array.isArray(works)) return [];
@@ -70,6 +92,20 @@
             arr = arr.filter(function (w) { return !!w.isDownloaded; });
         } else if (state.filter === 'notDownloaded') {
             arr = arr.filter(function (w) { return !w.isDownloaded; });
+        }
+
+        // 筛选：作品类型（视频/图集，基于 isImagePost/mediaType，与卡片渲染口径一致）
+        if (state.workType === 'image') {
+            arr = arr.filter(function (w) { return !!w.isImagePost || w.mediaType === 'image_post'; });
+        } else if (state.workType === 'video') {
+            arr = arr.filter(function (w) { return !w.isImagePost && w.mediaType !== 'image_post'; });
+        }
+
+        // 筛选：时长（多选档位，OR—命中任一所选档即显示；UI 仅“视频”模式启用并会随类型清空）
+        if (Array.isArray(state.durations) && state.durations.length) {
+            arr = arr.filter(function (w) {
+                return state.durations.indexOf(durationBucket(w.duration)) !== -1;
+            });
         }
 
         // 筛选：日期范围（按排序时间 sortTime || createTime；仅作品列表调用本函数）
@@ -94,6 +130,14 @@
                 const desc = (w.desc || '').toLowerCase();
                 const nick = (w.authorNickname || '').toLowerCase();
                 return kws.some(function (k) { return desc.indexOf(k) !== -1 || nick.indexOf(k) !== -1; });
+            });
+        }
+
+        // 筛选：话题标签（点卡片 chip 选中的话题；OR 命中——作品含任一所选话题即显示）
+        if (state.topics && state.topics.length) {
+            arr = arr.filter(function (w) {
+                const ts = Array.isArray(w.topics) ? w.topics : [];
+                return state.topics.some(function (t) { return ts.indexOf(t) !== -1; });
             });
         }
 

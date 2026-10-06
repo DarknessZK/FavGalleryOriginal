@@ -4,6 +4,7 @@
 // ==========================================
 
 import { createLogger } from './logger.js';
+import { DURATION_BUCKETS } from '../config/constants.js';
 
 const logger = createLogger('WorkListManager');
 
@@ -19,6 +20,7 @@ export class WorkListManager {
      * @param {Array} config.allAuthors - 所有作者数据（作者列表使用）
      * @param {number} config.pageSize - 每页显示数量
      * @param {Function} config.onStateChange - 状态变化回调 (state) => void
+     * @param {boolean} [config.renderStatus] - 是否渲染内置状态行「共 N 个…，共 M 页」（默认 true；作者作品钻取视图传 false，计数由专用元素承担）
      */
     constructor(config) {
         this.type = config.type;
@@ -28,10 +30,12 @@ export class WorkListManager {
         this.currentPage = 1;
         this.pageSize = config.pageSize || 50;
         this.onStateChange = config.onStateChange;
+        // ✅ 状态行渲染开关：作者作品钻取视图禁用（避免与顶部计数/截断标注重复）
+        this.renderStatus = config.renderStatus !== false;
 
         // ✅ 统一查询状态：关键词 + 高级筛选（saved / 时间范围）
         this.keyword = '';
-        this.filters = { saved: 'all', dateFrom: '', dateTo: '', type: 'all', authorIds: [] };
+        this.filters = { saved: 'all', dateFrom: '', dateTo: '', type: 'all', authorIds: [], durations: [] };
         this.sort = { key: '', dir: 'desc' };
 
         // DOM 元素缓存
@@ -74,7 +78,7 @@ export class WorkListManager {
         }
         this.filteredData = null;
         this.keyword = '';
-        this.filters = { saved: 'all', dateFrom: '', dateTo: '', type: 'all', authorIds: [] };
+        this.filters = { saved: 'all', dateFrom: '', dateTo: '', type: 'all', authorIds: [], durations: [] };
         this.sort = { key: '', dir: 'desc' };
         this.currentPage = 1;
         this.notifyStateChange();
@@ -206,9 +210,24 @@ export class WorkListManager {
      * ✅ 是否存在生效的查询条件（关键词或任一筛选条件）
      */
     hasActiveQuery() {
-        const { saved, dateFrom, dateTo, type, authorIds } = this.filters;
+        const { saved, dateFrom, dateTo, type, authorIds, durations } = this.filters;
         return !!this.keyword.trim() || saved !== 'all' || !!dateFrom || !!dateTo
-            || type !== 'all' || (Array.isArray(authorIds) && authorIds.length > 0);
+            || type !== 'all' || (Array.isArray(authorIds) && authorIds.length > 0)
+            || (Array.isArray(durations) && durations.length > 0);
+    }
+
+    /**
+     * ✅ 作品时长落档（基于 DURATION_BUCKETS 左开右闭区间，duration 缺省/非法归 0→首档 ≤15秒）
+     * @param {number} ms 视频时长（毫秒）
+     * @returns {string} 命中的档位 key
+     */
+    _bucketOf(ms) {
+        const d = (ms && ms > 0) ? ms : 0;
+        for (let i = 0; i < DURATION_BUCKETS.length; i++) {
+            const b = DURATION_BUCKETS[i];
+            if (i === 0 ? d <= b.max : (d > b.min && d <= b.max)) return b.key;
+        }
+        return DURATION_BUCKETS[DURATION_BUCKETS.length - 1].key;
     }
 
     /**
@@ -248,7 +267,7 @@ export class WorkListManager {
         }
 
         // 2. 保存状态过滤（作品列表）
-        const { saved, dateFrom, dateTo, type, authorIds } = this.filters;
+        const { saved, dateFrom, dateTo, type, authorIds, durations } = this.filters;
         if (saved === 'downloaded') {
             result = result.filter(work => work.isDownloaded === true);
         } else if (saved === 'notDownloaded') {
@@ -258,6 +277,12 @@ export class WorkListManager {
         // ✅ 3. 作品类型过滤（仅作品列表：视频/图集，基于 isImagePost）
         if (this.type !== 'following' && type && type !== 'all') {
             result = result.filter(work => type === 'image' ? !!work.isImagePost : !work.isImagePost);
+        }
+
+        // ✅ 3.5 时长过滤（仅作品列表，命中任一所选档位；UI 仅在“视频”模式启用并会随类型清空，故此处按 durations 非空即生效）
+        if (this.type !== 'following' && Array.isArray(durations) && durations.length > 0) {
+            const dset = new Set(durations);
+            result = result.filter(work => dset.has(this._bucketOf(work.video?.duration || 0)));
         }
 
         // ✅ 4. 作者多选过滤（仅作品列表，命中任一选中作者；id 两侧统一按 String 比较）
@@ -324,6 +349,7 @@ export class WorkListManager {
      * 更新状态显示
      */
     updateStatus() {
+        if (!this.renderStatus) return; // ✅ 钻取视图等场景禁用状态行渲染（计数由专用元素承担）
         if (!this.elements.status) return;
 
         const allData = this.type === 'following' ? this.allAuthors : this.allWorks;
@@ -365,7 +391,7 @@ export class WorkListManager {
      * ✅ 同步高级筛选栏启用状态（控件按 {type}FilterXxx 命名，authorWorks 钻取视图同样适用）
      */
     _updateFilterBarState() {
-        const controls = ['FilterSaved', 'FilterType', 'FilterFrom', 'FilterTo', 'FilterSort', 'FilterReset']
+        const controls = ['FilterSaved', 'FilterType', 'FilterFrom', 'FilterTo', 'FilterSort', 'FilterDuration', 'FilterReset']
             .map(suffix => document.getElementById(`${this.type}${suffix}`));
         if (!controls[0]) return; // 该列表无筛选栏（如 following）
 
@@ -373,13 +399,29 @@ export class WorkListManager {
         const enabled = allData.length > 0;
         controls.forEach(el => {
             if (!el) return;
-            // ✅ 自定义排序下拉为 div（无原生 disabled），用 class 切换（配合 pointer-events 阻止交互）
-            if (el.classList && el.classList.contains('sort-dropdown')) {
+            // ✅ 自定义排序/时长下拉为 div（无原生 disabled），用 class 切换（配合 pointer-events 阻止交互）
+            if (el.classList && (el.classList.contains('sort-dropdown') || el.classList.contains('dur-dropdown'))) {
                 el.classList.toggle('is-disabled', !enabled);
             } else {
                 el.disabled = !enabled;
             }
         });
+
+        // ✅ “时长”仅当类型为“视频”时可用：非视频（全部/图集）强制置灰，与数据可用性叠加
+        const durEl = document.getElementById(`${this.type}FilterDuration`);
+        if (durEl) {
+            const typeEl = document.getElementById(`${this.type}FilterType`);
+            const durEnabled = enabled && !!typeEl && typeEl.value === 'video';
+            durEl.classList.toggle('is-disabled', !durEnabled);
+        }
+
+        // ✅ 补全态（backfillMode）下自愈锁定“状态”筛选：保持“已保存”且不可改，直到退出补全态
+        //（本方法在每次 updateUI 都会执行，可覆盖上面“有数据即启用”的复位，保证分页/重渲后仍锁定）
+        const savedEl = document.getElementById(`${this.type}FilterSaved`);
+        if (savedEl && this.backfillMode) {
+            savedEl.value = 'downloaded';
+            savedEl.disabled = true;
+        }
     }
 
     /**
@@ -400,8 +442,8 @@ export class WorkListManager {
         } else {
             // ✅ 作品列表（点赞/收藏/作者钻取）：统一全功能卡片（checkbox + 保存按钮）
             import('./work-card-renderer.js').then(({ renderWorkList }) => {
-                // 渲染作品列表，传递选中状态
-                renderWorkList(this.elements.list, data, selectedIds);
+                // 渲染作品列表，传递选中状态；校验补全态（backfillMode）下已保存作品复选框解禁
+                renderWorkList(this.elements.list, data, selectedIds, this.backfillMode ? 'backfill' : 'download');
             });
         }
     }
@@ -528,7 +570,7 @@ export class WorkListManager {
         this.allAuthors = [];
         this.filteredData = null;
         this.keyword = '';
-        this.filters = { saved: 'all', dateFrom: '', dateTo: '', type: 'all', authorIds: [] };
+        this.filters = { saved: 'all', dateFrom: '', dateTo: '', type: 'all', authorIds: [], durations: [] };
         this.sort = { key: '', dir: 'desc' };
         this.currentPage = 1;
         this.notifyStateChange();

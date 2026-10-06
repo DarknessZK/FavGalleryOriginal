@@ -7,6 +7,30 @@
 (function () {
     'use strict';
 
+    // ---------- 诊断镜像：把 console.warn/error 同步写入离线页诊断缓冲 ----------
+    // window.__favGalleryDiag 由 my-collection.html 内联脚本提供（先于本文件执行）；
+    // 集中包装一次即可覆盖 core/features/index 全部 warn/error 调用点，无需逐处改。
+    (function () {
+        var diag = window.__favGalleryDiag;
+        if (!diag) return;
+        ['warn', 'error'].forEach(function (lvl) {
+            var orig = console[lvl];
+            console[lvl] = function () {
+                try {
+                    var parts = [];
+                    for (var i = 0; i < arguments.length; i++) {
+                        var a = arguments[i];
+                        if (a instanceof Error) parts.push((a.message || '') + (a.stack ? ' | ' + String(a.stack).split('\n')[1].trim() : ''));
+                        else if (a && typeof a === 'object') { try { parts.push(JSON.stringify(a)); } catch (e) { parts.push(String(a)); } }
+                        else parts.push(String(a));
+                    }
+                    diag[lvl](parts.join(' '), 'console');
+                } catch (e) { /* 诊断自身不得影响业务 */ }
+                return orig.apply(console, arguments);
+            };
+        });
+    })();
+
     // ---------- 工具 ----------
 
     /** HTML 转义，防止 desc/nickname 中的特殊字符破坏结构 */
@@ -108,7 +132,10 @@
         const status = author.downloadStatus || 'pending';
         let badge = '';
         let cardExtra = '';
-        if (status === 'completed') {
+        // ✅ 已取关（软删除）角标优先：条目保留在列表，标注失效状态供后续清理功能使用
+        if (author.isDeleted) {
+            badge = '<span class="status-badge" style="background:#bfbfbf;" title="已取消关注（软删除）：作品保留在本地">🚫</span>';
+        } else if (status === 'completed') {
             badge = '<span class="status-badge status-completed" title="已全部保存">✓</span>';
             cardExtra = ' status-completed-card';
         } else if (status === 'partial') {
@@ -133,6 +160,15 @@
                     </div>
                 </div>
             </div>`;
+    }
+
+    // 去掉描述中的话题 token（#xxx / ＃xxx）用于展示——话题已单独成 chips，不重复显示
+    // （与 utils/topic.js extractTopics 同边界规则；离线页为经典脚本无法 import，此处内联等价实现）
+    function stripTopicTokens(desc) {
+        if (typeof desc !== 'string' || !desc) return '';
+        return desc.replace(/[＃#][^\s＃#，。！？、；：,.!?;:]+/g, '')
+                   .replace(/\s{2,}/g, ' ')
+                   .trim();
     }
 
     /** 作品卡片 HTML（对齐 .video-card / .video-cover / .video-info 结构） */
@@ -218,18 +254,46 @@
             ? `<div class="card-actions">${actions.join('')}</div>`
             : '';
 
+        // 话题标签 chips（从 desc 派生、生成端已固化进 work.topics）
+        // 单个固定两行高的只读“多标签选择框”（复现侧边栏选择收藏夹组件的右侧框）：折叠可滚动，
+        // 点击框体本身切为绝对定位向下展开、覆盖下方组件显示全部（refitTopicBoxes 标记可滚动）
+        const topicList = Array.isArray(work.topics) ? work.topics : [];
+        let topicsHtml = '';
+        if (topicList.length) {
+            const chipHtml = function (t) {
+                return `<span class="topic-chip" data-topic="${escapeHtml(t)}" title="按此话题筛选">#${escapeHtml(t)}</span>`;
+            };
+            const chips = topicList.map(chipHtml).join('');
+            topicsHtml = `<div class="card-topics-wrap"><div class="card-topics">${chips}</div></div>`;
+        }
+
+        // 有话题时从描述展示中去掉话题 token（避免与 chips 重复）
+        const displayDesc = topicList.length ? stripTopicTokens(work.desc) : (work.desc || '');
+
         return `
             <div class="video-card" data-workid="${escapeHtml(work.workId)}">
                 ${typeBadge}
                 ${savedBadge}
                 ${cover}
                 <div class="video-info">
-                    <div class="video-title">${escapeHtml(work.desc) || '（无描述）'}</div>
+                    <div class="video-title">${escapeHtml(displayDesc) || '（无描述）'}</div>
                     <div class="video-meta">${metaParts.join(' · ')}</div>
+                    ${topicsHtml}
                     ${audio}
                     ${actionsHtml}
                 </div>
             </div>`;
+    }
+
+    /** 标记话题超两行被裁剪的折叠框（.has-more）：用于显示底部渐隐提示，整框仍可点击展开（插入 DOM 后同步测量） */
+    function refitTopicBoxes(container) {
+        if (!container) return;
+        const wraps = container.querySelectorAll('.card-topics-wrap');
+        for (let i = 0; i < wraps.length; i++) {
+            const box = wraps[i].querySelector('.card-topics');
+            if (!box) continue;
+            wraps[i].classList.toggle('has-more', box.scrollHeight - box.clientHeight > 2);
+        }
     }
 
     /** 渲染作者列表（替换容器内容） */
@@ -267,6 +331,7 @@
         }
         while (tmp.firstChild) frag.appendChild(tmp.firstChild);
         container.appendChild(frag);
+        refitTopicBoxes(container);
     }
 
     // ---------- 放大预览（图片 / 视频 / 图集 / 音频） ----------

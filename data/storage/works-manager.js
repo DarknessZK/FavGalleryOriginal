@@ -5,6 +5,7 @@
 
 import { database } from '../database/database.js';
 import * as relationManager from '../database/relation-manager.js';
+import { markOfflineDirty } from '../export/offline-delta.js';
 import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('WorksManager');
@@ -51,6 +52,8 @@ export async function saveLikedWorks(fileSystem, data) {
         };
     });
     await database.save('works', worksToSave);
+    // ♻️ 登记离线增量：点赞列表刷新会新增/更新/软删作品，下次 flush 按当前关系重建所属分片
+    markOfflineDirty(works.map(w => w.workId));
     
     // 2. 保存点赞分组元数据
     await database.save('liked_group', {
@@ -154,6 +157,8 @@ export async function saveBookmarkedWorks(fileSystem, data) {
         };
     });
     await database.save('works', worksToSave);
+    // ♻️ 登记离线增量（收藏列表刷新）
+    markOfflineDirty(works.map(w => w.workId));
     
     // 2. 更新收藏夹元数据
     // ✅ 合并已有记录：database.save 是 put（整体覆盖），若只传部分字段会丢失
@@ -255,6 +260,8 @@ export async function saveAuthorWorks(fileSystem, data) {
         };
     });
     await database.save('works', worksToSave);
+    // ♻️ 登记离线增量（作者作品刷新）
+    markOfflineDirty(works.map(w => w.workId));
 
     logger.info(`💾 已保存 ${works.length} 个作者作品到 IndexedDB (作者: ${uid})`);
 

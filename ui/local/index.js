@@ -36,6 +36,8 @@
         collects: { subId: null, subWorks: [] },
         global: { index: null, active: false, works: [] },  // 全局搜索：索引缓存 / 结果态
         filter: 'all',
+        workType: 'all',           // 作品类型筛选：'all' | 'video' | 'image'
+        durations: [],             // 时长多选档位 key（仅 workType==='video' 时生效；空=不限）
         // ✅ 多维排序：sortOrder = 已启用维度（按勾选顺序定主次，先选为主键）；
         //    sortDirs = 各维度的升/降设定（未启用也保留，点选项文本可随时预览切换）
         //    空 sortOrder = 不排序（保留离线数据的生成顺序）
@@ -43,6 +45,7 @@
         sortDirs: { time: 'desc', status: 'desc' },
         keyword: '',
         keywords: [],            // 已固化的多关键词小卡片（与正在输入的 keyword 叠加过滤；分片内 OR，全局搜索 AND）
+        topics: [],              // ✅ 话题标签筛选（点卡片话题 chip 叠加/取消，OR 命中；从 desc 派生的只读数据）
         dateFrom: '',            // 时间筛选起始（YYYY-MM-DD，空=不限）
         dateTo: '',              // 时间筛选结束（YYYY-MM-DD，空=不限）
         pageSize: DEFAULT_PAGE_SIZE,
@@ -147,6 +150,72 @@
         }).join('');
     }
 
+    /** 渲染已选中的话题筛选小卡片，并联动「清除全部」按钮显隐 */
+    function renderTopicChips() {
+        const box = $('topicChips');
+        if (!box) return;
+        box.innerHTML = state.topics.map(function (t) {
+            return '<span class="topic-filter-chip" data-topic="' + core.escapeHtml(t) + '">' +
+                '<span class="chip-text">#' + core.escapeHtml(t) + '</span>' +
+                '<i class="chip-close" title="取消该话题筛选">×</i></span>';
+        }).join('');
+        const clr = $('topicClear');
+        if (clr) clr.style.display = state.topics.length ? 'inline-flex' : 'none';
+    }
+
+    /** 叠加/取消某话题筛选（OR 语义：点选加入，再点移除） */
+    function toggleTopic(topic) {
+        if (!topic) return;
+        const i = state.topics.indexOf(topic);
+        if (i === -1) state.topics.push(topic);
+        else state.topics.splice(i, 1);
+        renderTopicChips();
+        rerenderCurrent();
+    }
+
+    /** 当前视图的作品来源数组（用于收集话题候选池；一级作者/收藏夹列表无作品返回 []） */
+    function currentWorksSource() {
+        if (state.global.active) return state.global.works;
+        if (state.currentTab === 'liked') return state.liked.works;
+        if (state.currentTab === 'authors') return state.authors.subUid ? (state.authors.subWorks || []) : [];
+        if (state.currentTab === 'bookmarked') return state.collects.subId ? (state.collects.subWorks || []) : [];
+        return [];
+    }
+
+    /** 依据已加载作品的话题，重建话题输入框的候选池（datalist） */
+    function refreshTopicPool() {
+        const dl = $('topicPool');
+        if (!dl) return;
+        const src = currentWorksSource();
+        const seen = Object.create(null);
+        const opts = [];
+        for (let i = 0; i < src.length; i++) {
+            const ts = src[i].topics;
+            if (!Array.isArray(ts)) continue;
+            for (let j = 0; j < ts.length; j++) {
+                const t = ts[j];
+                if (t && !seen[t]) { seen[t] = 1; opts.push(t); }
+            }
+        }
+        dl.innerHTML = opts.map(function (t) {
+            return '<option value="' + core.escapeHtml(t) + '"></option>';
+        }).join('');
+    }
+
+    /** 提交话题输入框内容（按逗号切分、去井号前缀、去重后加入筛选） */
+    function commitTopicInput() {
+        const inp = $('topicInput');
+        if (!inp) return;
+        const parts = inp.value.split(/[,，]/)
+            .map(function (x) { return x.trim().replace(/^[#＃]+/, ''); })
+            .filter(Boolean);
+        if (!parts.length) return;
+        parts.forEach(function (p) { if (state.topics.indexOf(p) === -1) state.topics.push(p); });
+        inp.value = '';
+        renderTopicChips();
+        rerenderCurrent();
+    }
+
     /** 把当前输入（按逗号切分、去重）固化为关键词小卡片 */
     function commitKeywords() {
         const s = $('searchInput');
@@ -170,7 +239,9 @@
         if (clearKeyword) {
             state.keyword = '';
             state.keywords = [];
+            state.topics = [];
             renderSearchChips();
+            renderTopicChips();
             const s = $('searchInput');
             if (s) s.value = '';
         }
@@ -272,6 +343,7 @@
         const onlyTimeDesc = state.sortOrder.length === 1 &&
             state.sortOrder[0] === 'time' && state.sortDirs.time === 'desc';
         return state.filter === 'all' && state.keyword === '' && state.keywords.length === 0 &&
+            state.topics.length === 0 &&
             onlyTimeDesc &&
             !state.dateFrom && !state.dateTo;
     }
@@ -455,6 +527,16 @@
         state.authors.subUid = uid;
         state.authors.subWorks = [];
         state.currentPage = 1;
+        // ✅ 无作品作者没有分片文件（与空收藏夹同范式）：先查索引 meta 直接走空态，避免 file:// 加载失败噪音
+        const meta = (state.authors.list || [])
+            .find(function (a) { return String(a.uid) === String(uid); });
+        if (meta && meta.hasShard === false) {
+            const emptyTitle = (meta.nickname || '作者') + (meta.isDeleted ? '（已取关）' : '');
+            showSubView(emptyTitle, '0 个作品');
+            updateToolbarForView();
+            renderCurrentList();
+            return;
+        }
         showSubView('加载中…', '');
         updateToolbarForView();
         try {
@@ -580,6 +662,7 @@
             core.renderWorkList(list, pageItems);
         }
 
+        if (isWorksView()) refreshTopicPool();
         updateEmptyState(tab, total);
         updateToolbarForView();
     }
@@ -655,6 +738,38 @@
         // 蓝色退出按钮（筛选「未保存」右侧）：仅全局搜索模式显示
         const gb = $('globalExitBtn');
         if (gb) gb.style.display = state.global.active ? 'inline-flex' : 'none';
+        // 话题筛选栏：仅作品视图显示（一级作者/收藏夹列表无话题）
+        const tf = $('topicFilterBar');
+        if (tf) tf.style.display = works ? 'flex' : 'none';
+        // 作品类型 / 时长筛选：仅作品视图显示（一级作者/收藏夹列表不适用）
+        const ty = $('typeFilterSection');
+        if (ty) ty.style.display = works ? 'flex' : 'none';
+        const du = $('durationFilterSection');
+        if (du) du.style.display = works ? 'flex' : 'none';
+        syncDurationAvailability();
+    }
+
+    /**
+     * 时长筛选可用性联动：仅当类型为“视频”时启用（与侧边栏语义一致）；
+     * 否则置灰不可交互并清空已选档位，避免隐藏条件下仍参与过滤。
+     */
+    function syncDurationAvailability() {
+        const du = $('durationFilterSection');
+        if (!du) return;
+        const enable = state.workType === 'video';
+        du.classList.toggle('is-disabled', !enable);
+        const boxes = document.querySelectorAll('input[name="duration"]');
+        for (let i = 0; i < boxes.length; i++) boxes[i].disabled = !enable;
+        if (!enable && state.durations.length) clearDurations();
+    }
+
+    /** 清空时长多选（state + DOM 勾选 + 清除按钮态） */
+    function clearDurations() {
+        state.durations = [];
+        const boxes = document.querySelectorAll('input[name="duration"]');
+        for (let i = 0; i < boxes.length; i++) boxes[i].checked = false;
+        const clr = $('durationClear');
+        if (clr) clr.style.display = 'none';
     }
 
     // ---------- 二级视图返回栏 ----------
@@ -723,6 +838,35 @@
         label.parentNode.insertBefore(btn, label.nextSibling);
     }
 
+    /**
+     * 动态确保话题筛选栏存在（兼容离线入口 HTML 命中 file:// 旧缓存：
+     * 即使拷贝的 FavGallery.html 仍为旧版、未含 #topicFilterBar，也在运行时即时注入，
+     * 参照 ensureGlobalExitBtn 的运行时注入模式）
+     */
+    function ensureTopicFilterBar() {
+        if ($('topicFilterBar')) return;
+        // 清理旧模板遗留的只读话题行（其 id 与新版内层容器 topicChips 冲突）
+        const stale = document.querySelector('.topic-chips-row');
+        if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
+        const tabNav = $('tabNav');
+        const host = tabNav && tabNav.parentNode;
+        if (!host) return;
+        const bar = document.createElement('div');
+        bar.className = 'topic-filter-bar';
+        bar.id = 'topicFilterBar';
+        bar.style.display = 'none';
+        bar.innerHTML =
+            '<span class="label">话题</span>' +
+            '<div class="topic-tag-input" id="topicTagInput">' +
+                '<span class="topic-chips" id="topicChips"></span>' +
+                '<input type="text" class="topic-input" id="topicInput" list="topicPool" autocomplete="off" ' +
+                    'placeholder="输入或选择话题筛选，回车/逗号添加（多个话题=任一命中 OR）">' +
+                '<datalist id="topicPool"></datalist>' +
+            '</div>' +
+            '<button class="topic-clear" id="topicClear" title="清除全部话题筛选" style="display:none;">✕ 清除</button>';
+        host.insertBefore(bar, tabNav);
+    }
+
     function bindUI() {
         // Tab 切换
         const nav = $('tabNav');
@@ -783,11 +927,96 @@
             }
         });
 
+        // 话题标签交互（复现侧边栏选择收藏夹框：折叠/展开由点击框体本身触发，非仅箭头）
+        document.addEventListener('click', function (e) {
+            if (!e.target || !e.target.closest) return;
+            // 顶部筛选条 chip 的 ×：取消该话题（不属于卡片框）
+            const closeX = e.target.closest('.topic-filter-chip .chip-close');
+            if (closeX) {
+                const c = closeX.closest('.topic-filter-chip');
+                if (c) toggleTopic(c.getAttribute('data-topic'));
+                return;
+            }
+            // 点击卡片框以外：收起所有已展开的话题框
+            const wrap = e.target.closest('.card-topics-wrap');
+            if (!wrap) {
+                const opened = document.querySelectorAll('.card-topics-wrap.open');
+                for (let i = 0; i < opened.length; i++) opened[i].classList.remove('open');
+                return;
+            }
+            // 点框内话题 chip：应用筛选并收起（chip 是“选择项”，不触发展开）
+            const chip = e.target.closest('.topic-chip');
+            if (chip) {
+                toggleTopic(chip.getAttribute('data-topic'));
+                wrap.classList.remove('open');
+                return;
+            }
+            // 点框体其余区域（空白/边缘）：切换展开/收起（整框即触发器）
+            if (e.target.closest('.card-topics')) wrap.classList.toggle('open');
+        });
+
+        // 话题筛选输入框（可输入的多标签选择器）：回车/逗号添加，空输入退格删末个，datalist 选择即添加
+        const topicInput = $('topicInput');
+        if (topicInput) {
+            // 输入法上字/粘贴出中或英文逗号（，,）时自动切分固化（keydown 对 IME 中文逗号不触发，靠 input 兼底）
+            topicInput.addEventListener('input', features.debounce(function () {
+                if (/[,，]/.test(topicInput.value)) commitTopicInput();
+            }, 250));
+            topicInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ',' || e.key === '，') { e.preventDefault(); commitTopicInput(); }
+                else if (e.key === 'Backspace' && !topicInput.value && state.topics.length) {
+                    state.topics.pop();
+                    renderTopicChips();
+                    rerenderCurrent();
+                }
+            });
+            topicInput.addEventListener('change', function () { commitTopicInput(); });
+        }
+        const topicTagInput = $('topicTagInput');
+        if (topicTagInput && topicInput) {
+            topicTagInput.addEventListener('click', function (e) {
+                if (e.target === topicTagInput) topicInput.focus();
+            });
+        }
+        const topicClear = $('topicClear');
+        if (topicClear) topicClear.addEventListener('click', function () {
+            state.topics = [];
+            renderTopicChips();
+            rerenderCurrent();
+        });
+
         // 筛选
         document.querySelectorAll('input[name="filter"]').forEach(function (radio) {
             radio.addEventListener('change', function () {
                 if (radio.checked) { state.filter = radio.value; rerenderCurrent(); }
             });
+        });
+
+        // ✅ 作品类型筛选（单选：全部/视频/图集）
+        document.querySelectorAll('input[name="workType"]').forEach(function (radio) {
+            radio.addEventListener('change', function () {
+                if (!radio.checked) return;
+                state.workType = radio.value;
+                syncDurationAvailability();
+                rerenderCurrent();
+            });
+        });
+
+        // ✅ 时长筛选（多选档位，命中任一所选即显示）
+        document.querySelectorAll('input[name="duration"]').forEach(function (box) {
+            box.addEventListener('change', function () {
+                const picked = [];
+                document.querySelectorAll('input[name="duration"]:checked').forEach(function (b) { picked.push(b.value); });
+                state.durations = picked;
+                const dclr = $('durationClear');
+                if (dclr) dclr.style.display = picked.length ? 'inline-flex' : 'none';
+                rerenderCurrent();
+            });
+        });
+        const durationClear = $('durationClear');
+        if (durationClear) durationClear.addEventListener('click', function () {
+            clearDurations();
+            rerenderCurrent();
         });
 
         // 时间范围筛选（仅作品视图生效）
@@ -900,6 +1129,7 @@
         core.initInteractions();
         if (features && features.bindHoverPreview) features.bindHoverPreview();
         ensureGlobalExitBtn();
+        ensureTopicFilterBar();
         bindUI();
 
         try {

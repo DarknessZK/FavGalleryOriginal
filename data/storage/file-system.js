@@ -582,6 +582,75 @@ class FileSystem {
     }
 
     /**
+     * ✅ 删除文件（相对根目录），不存在则忽略
+     *
+     * @param {string} filePath - 文件路径
+     * @returns {Promise<boolean>} 是否实际删除
+     */
+    async removeFile(filePath) {
+        if (!this.rootDirectoryHandle) {
+            throw new Error('未设置根目录句柄');
+        }
+        const parts = filePath.split('/').filter(part => part.length > 0);
+        const name = parts.pop();
+        if (!name) return false;
+
+        let dir = this.rootDirectoryHandle;
+        for (const part of parts) {
+            try {
+                dir = await dir.getDirectoryHandle(part);
+            } catch (error) {
+                if (error.name === 'NotFoundError') return false; // 路径不存在，无需删除
+                throw error;
+            }
+        }
+
+        try {
+            await dir.removeEntry(name);
+            logger.debug(`🗑️ 已删除文件: ${filePath}`);
+            return true;
+        } catch (error) {
+            if (error.name === 'NotFoundError') return false;
+            throw error;
+        }
+    }
+
+    /**
+     * ✅ 递归删除目录（相对根目录），不存在则忽略
+     *    用于生成离线壳前清空可能残留的历史文件
+     *
+     * @param {string} dirPath - 目录路径
+     * @returns {Promise<boolean>} 是否实际删除
+     */
+    async removeDirectory(dirPath) {
+        if (!this.rootDirectoryHandle) {
+            throw new Error('未设置根目录句柄');
+        }
+        const parts = dirPath.split('/').filter(part => part.length > 0);
+        const name = parts.pop();
+        if (!name) return false;
+
+        let dir = this.rootDirectoryHandle;
+        for (const part of parts) {
+            try {
+                dir = await dir.getDirectoryHandle(part);
+            } catch (error) {
+                if (error.name === 'NotFoundError') return false;
+                throw error;
+            }
+        }
+
+        try {
+            await dir.removeEntry(name, { recursive: true });
+            logger.debug(`🗑️ 已递归删除目录: ${dirPath}`);
+            return true;
+        } catch (error) {
+            if (error.name === 'NotFoundError') return false;
+            throw error;
+        }
+    }
+
+    /**
      * 获取根目录路径（用于构建保存路径）
      * @returns {string} 根目录名称
      */
